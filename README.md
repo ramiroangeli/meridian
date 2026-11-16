@@ -48,7 +48,9 @@ lib/state.ts       arma el estado que consume el tablero
 lib/mcp-tools.ts   herramientas del conector
 lib/auth.ts        sesión del tablero y token del conector
 app/api/           estado, ingreso, pausa, propuestas, conector MCP
-public/tablero.html  tablero y sala 3D
+public/tablero.html  tablero
+public/oficina.js    oficina 3D: nueve salas por área, personas animadas según su estado
+lib/org.ts         organigrama: persona, puesto, área y modelo sugerido de cada agente
 scripts/e2e.mjs    prueba de punta a punta
 ```
 

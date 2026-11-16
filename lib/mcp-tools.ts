@@ -128,11 +128,11 @@ export function registerTools(server: any) {
 
   server.registerTool("list_agents", {
     title: "Agentes",
-    description: "Los agentes definidos, con su ficha (objetivo, permisos, indicador, cuándo escalar) y el estado de su última ejecución.",
+    description: "El equipo de agentes: persona, puesto, área, modelo sugerido, ficha (objetivo, permisos, indicador, cuándo escalar) y estado de su última ejecución.",
     inputSchema: z.object({}),
   }, async () => {
     const u = await currentUser();
-    return ok((await agentRows(u.id)).map((a) => ({ codigo: a.code, nombre: a.name, implementado: a.implemented, objetivo: a.objective, datos: a.data, entregables: a.deliverables, permisos: a.permissions, indicador: a.kpi, depende_de: a.depends_on, escala_cuando: a.escalation,
+    return ok((await agentRows(u.id)).map((a) => ({ codigo: a.code, rol: a.name, persona: a.persona, puesto: a.title, area: a.area, modelo_sugerido: a.model, implementado: a.implemented, objetivo: a.objective, datos: a.data, entregables: a.deliverables, permisos: a.permissions, indicador: a.kpi, depende_de: a.depends_on, escala_cuando: a.escalation,
       ultima_ejecucion: a.run_id ? { run_id: a.run_id, estado: a.status, tarea: a.task, resultado: a.result, inicio: a.started_at, fin: a.finished_at } : null })));
   });
 

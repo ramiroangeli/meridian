@@ -82,7 +82,7 @@ export async function buildState() {
       fiscal: months.map((m) => pick(m, (r) => r.kind === "tax_reserve")),
     },
     agents: agents.map((a) => ({
-      c: a.code, n: a.name, st: a.status ?? (a.implemented ? "prog" : "idea"),
+      c: a.code, n: a.name, p: a.persona || a.name, title: a.title || a.name, area: a.area || "dir", model: a.model || "", st: a.status ?? (a.implemented ? "prog" : "idea"),
       task: a.task ?? "Sin tareas", res: a.result || (a.implemented ? "Sin resultados todavía" : "Rol todavía no implementado"),
       last: a.status === "run" ? "en curso" : rel(a.finished_at ?? a.started_at ?? null, "nunca"),
       next: a.next_note ?? rel(a.next_run_at ?? null, "sin programar"),

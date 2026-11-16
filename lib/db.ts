@@ -1,5 +1,6 @@
 import { SCHEMA, TABLES } from "./schema";
 import { seed } from "./seed";
+import { ORG_SCHEMA, fillOrg } from "./org";
 
 export type Run = (text: string, params?: unknown[]) => Promise<any[]>;
 const g = globalThis as unknown as { __meridiano?: Promise<Run> };
@@ -31,6 +32,8 @@ async function init(): Promise<Run> {
   for (const t of TABLES) await run(`alter table ${t} enable row level security`);
   const n = await run("select count(*)::int as n from users");
   if (n[0].n === 0) await seed(run);
+  for (const s of ORG_SCHEMA) await run(s);
+  await fillOrg(run);
   return run;
 }
 
