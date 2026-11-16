@@ -1,0 +1,44 @@
+import { SCHEMA } from "./schema";
+import { seed } from "./seed";
+
+export type Run = (text: string, params?: unknown[]) => Promise<any[]>;
+const g = globalThis as unknown as { __meridiano?: Promise<Run> };
+
+async function connect(): Promise<Run> {
+  const url = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+  if (url) {
+    const { Pool } = await import("pg");
+    const pool = new Pool({ connectionString: url, max: 3 });
+    return async (t, p) => (await pool.query(t, p as any[])).rows;
+  }
+  if (process.env.VERCEL) throw new Error("Falta DATABASE_URL: conectá una base Postgres al proyecto.");
+  // Desarrollo local sin instalar nada: Postgres embebido en una carpeta.
+  const { PGlite } = await import("@electric-sql/pglite");
+  const dir = process.env.PGLITE_DIR || ".data/pg";
+  (await import("node:fs")).mkdirSync(dir, { recursive: true });
+  const db = new PGlite(dir);
+  return async (t, p) => (await db.query(t, p as any[])).rows as any[];
+}
+
+async function init(): Promise<Run> {
+  const run = await connect();
+  for (const s of SCHEMA) await run(s);
+  const n = await run("select count(*)::int as n from users");
+  if (n[0].n === 0) await seed(run);
+  return run;
+}
+
+export async function q(text: string, params?: unknown[]): Promise<any[]> {
+  if (!g.__meridiano) g.__meridiano = init().catch((e) => { g.__meridiano = undefined; throw e; });
+  return (await g.__meridiano)(text, params);
+}
+
+// Un solo usuario por ahora. Cuando haya varios, esto sale de la sesión.
+export async function currentUser() {
+  const u = await q("select id, name, email, base_currency, paused, demo from users order by created_at limit 1");
+  return u[0] as { id: string; name: string; email: string; base_currency: string; paused: boolean; demo: boolean };
+}
+
+export async function logEvent(userId: string, actor: string, action: string, result = "") {
+  await q("insert into events (user_id, actor, action, result) values ($1,$2,$3,$4)", [userId, actor, action, result]);
+}
