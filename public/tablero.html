@@ -517,10 +517,10 @@ function apply(d,json){
 function load(){
   return fetch("/api/state",{credentials:"same-origin"}).then(function(r){
     if(r.status===401){location.href="/login";throw new Error("401");}
-    if(!r.ok)throw new Error("estado "+r.status);
+    if(!r.ok)return r.json().catch(function(){return {};}).then(function(j){throw new Error(j.hint?j.hint+" (código "+j.code+")":"estado "+r.status);});
     return r.text();
   }).then(function(t){if(t!==lastJson)apply(JSON.parse(t),t);}).catch(function(e){
-    if(!lastJson&&e.message!=="401")document.getElementById("view").innerHTML='<div class="banner">No se pudo leer la base de datos. Revisá la conexión y recargá la página.</div>';
+    if(!lastJson&&e.message!=="401")document.getElementById("view").innerHTML='<div class="banner">No se pudo leer la base de datos. '+esc(e.message)+'</div>';
   });
 }
 function post(url,body){

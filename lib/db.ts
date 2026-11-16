@@ -12,7 +12,7 @@ async function connect(): Promise<Run> {
     // porque el certificado del pooler de Supabase no valida contra las autoridades por defecto de Node.
     const local = /localhost|127\.0\.0\.1/.test(url);
     const clean = url.replace(/([?&])sslmode=[^&]*&?/, "$1").replace(/[?&]$/, "");
-    const pool = new Pool({ connectionString: clean, max: 3, ssl: local ? undefined : { rejectUnauthorized: false } });
+    const pool = new Pool({ connectionString: clean, max: 3, connectionTimeoutMillis: 10_000, query_timeout: 20_000, ssl: local ? undefined : { rejectUnauthorized: false } });
     return async (t, p) => (await pool.query(t, p as any[])).rows;
   }
   if (process.env.VERCEL) throw new Error("Falta DATABASE_URL: conectá una base Postgres al proyecto.");
@@ -47,4 +47,18 @@ export async function currentUser() {
 
 export async function logEvent(userId: string, actor: string, action: string, result = "") {
   await q("insert into events (user_id, actor, action, result) values ($1,$2,$3,$4)", [userId, actor, action, result]);
+}
+
+// Traduce errores de conexión a un mensaje accionable, sin exponer credenciales.
+export function dbHint(e: any): { code: string; hint: string } {
+  const code = String(e?.code || "desconocido");
+  const map: Record<string, string> = {
+    "28P01": "La contraseña dentro de DATABASE_URL no coincide con la de la base.",
+    ENOTFOUND: "La dirección del servidor en DATABASE_URL es inválida. Suele pasar si la contraseña tiene símbolos como @ # / ? o %: usá una solo de letras y números.",
+    ECONNREFUSED: "El servidor rechazó la conexión. Revisá el puerto (6543 para el pooler de Supabase).",
+    ETIMEDOUT: "La base no respondió a tiempo. Revisá que el proyecto de Supabase esté activo.",
+    "XX000": "El pooler no reconoce el usuario. En Supabase el usuario es postgres.IDPROYECTO.",
+  };
+  const hint = map[code] || (String(e?.message || "").includes("DATABASE_URL") ? "Falta DATABASE_URL en las variables del proyecto." : "Error de base de datos. Revisá los registros de Vercel.");
+  return { code, hint };
 }
