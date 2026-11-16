@@ -23,7 +23,7 @@ Sin `DATABASE_URL` usa una base Postgres embebida en `.data/` y carga datos de e
 ## Desplegar en Vercel
 
 1. Subí el repo a GitHub e importalo en Vercel.
-2. Agregá una base Postgres (Neon desde el Marketplace de Vercel). Eso define `DATABASE_URL`.
+2. Agregá una base Postgres (Supabase o Neon). Definí `DATABASE_URL` con la cadena de conexión del pooler; con la integración de Vercel alcanza `POSTGRES_URL`.
 3. Definí `APP_PASSWORD`, `SESSION_SECRET` y `MCP_TOKEN` (ver `.env.example`). Usá valores largos y aleatorios.
 4. En el primer pedido se crean las tablas y los datos de ejemplo.
 

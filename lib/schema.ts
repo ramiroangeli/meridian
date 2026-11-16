@@ -92,3 +92,5 @@ export const SCHEMA: string[] = [
      currency text not null, per_base numeric not null,
      primary key (user_id, currency))`,
 ];
+
+export const TABLES = ["users", "accounts", "balances", "liabilities", "transactions", "net_worth_history", "agents", "agent_runs", "proposals", "events", "fiscal_items", "fx_rates"];

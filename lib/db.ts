@@ -1,4 +1,4 @@
-import { SCHEMA } from "./schema";
+import { SCHEMA, TABLES } from "./schema";
 import { seed } from "./seed";
 
 export type Run = (text: string, params?: unknown[]) => Promise<any[]>;
@@ -8,7 +8,11 @@ async function connect(): Promise<Run> {
   const url = process.env.DATABASE_URL || process.env.POSTGRES_URL;
   if (url) {
     const { Pool } = await import("pg");
-    const pool = new Pool({ connectionString: url, max: 3 });
+    // Los proveedores gestionados (Supabase, Neon) exigen TLS. Se quita sslmode de la URL y se configura acá,
+    // porque el certificado del pooler de Supabase no valida contra las autoridades por defecto de Node.
+    const local = /localhost|127\.0\.0\.1/.test(url);
+    const clean = url.replace(/([?&])sslmode=[^&]*&?/, "$1").replace(/[?&]$/, "");
+    const pool = new Pool({ connectionString: clean, max: 3, ssl: local ? undefined : { rejectUnauthorized: false } });
     return async (t, p) => (await pool.query(t, p as any[])).rows;
   }
   if (process.env.VERCEL) throw new Error("Falta DATABASE_URL: conectá una base Postgres al proyecto.");
@@ -23,6 +27,8 @@ async function connect(): Promise<Run> {
 async function init(): Promise<Run> {
   const run = await connect();
   for (const s of SCHEMA) await run(s);
+  // Sin políticas, RLS bloquea el acceso por la API de datos de Supabase; la app entra como dueña de las tablas.
+  for (const t of TABLES) await run(`alter table ${t} enable row level security`);
   const n = await run("select count(*)::int as n from users");
   if (n[0].n === 0) await seed(run);
   return run;
