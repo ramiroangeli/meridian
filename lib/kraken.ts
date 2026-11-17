@@ -1,7 +1,7 @@
 import { createHash, createHmac } from "node:crypto";
 
 // Cliente mínimo de Kraken: solo lectura. No hay ninguna función para operar ni retirar.
-const base = () => process.env.KRAKEN_API_BASE || "https://api.kraken.com";
+export const base = () => process.env.KRAKEN_API_BASE || "https://api.kraken.com";
 export const krakenConfigured = () => !!(process.env.KRAKEN_API_KEY && process.env.KRAKEN_API_SECRET);
 export const tradeConfigured = () => !!(process.env.KRAKEN_TRADE_KEY && process.env.KRAKEN_TRADE_SECRET);
 
@@ -26,7 +26,7 @@ const ERRORS: [RegExp, string][] = [
   [/Unknown asset pair/i, "Kraken no ofrece ese par."],
   [/Unknown order/i, "Kraken no encuentra esa orden."],
 ];
-function explain(raw: string) { for (const [re, msg] of ERRORS) if (re.test(raw)) return msg; return "Kraken respondió: " + raw; }
+export function explain(raw: string) { for (const [re, msg] of ERRORS) if (re.test(raw)) return msg; return "Kraken respondió: " + raw; }
 
 // "read" usa la clave de solo lectura; "trade", la de operación (sin permiso de retiro).
 async function priv(path: string, params: Record<string, string> = {}, which: "read" | "trade" = "read"): Promise<any> {

@@ -164,6 +164,11 @@ export const SCHEMA: string[] = [
      proposal_id uuid references proposals(id) on delete set null,
      result text not null default '',
      created_at timestamptz not null default now())`,
+  `create table if not exists trading_watchlist (
+     user_id uuid not null references users(id) on delete cascade,
+     asset text not null, pair text not null, thesis text not null default '', agent_code text not null default 'N',
+     created_at timestamptz not null default now(), expires_at timestamptz not null,
+     primary key (user_id, asset))`,
 ];
 
-export const TABLES = ["users", "accounts", "balances", "liabilities", "transactions", "net_worth_history", "agents", "agent_runs", "proposals", "events", "fiscal_items", "fx_rates", "agent_tasks", "source_status", "price_history", "trading_mandates", "trading_fills", "trading_equity", "trading_positions", "trading_intents"];
+export const TABLES = ["users", "accounts", "balances", "liabilities", "transactions", "net_worth_history", "agents", "agent_runs", "proposals", "events", "fiscal_items", "fx_rates", "agent_tasks", "source_status", "price_history", "trading_mandates", "trading_fills", "trading_equity", "trading_positions", "trading_intents", "trading_watchlist"];

@@ -1,6 +1,7 @@
 import { q, currentUser, logEvent } from "./db";
 import { ticker, clearTickerCache, pairMeta, addOrder, cancelOrder, queryOrder, waitFilled, balanceWith, tradeConfigured, krakenConfigured, ohlcDaily, KrakenError } from "./kraken";
-import { ALLOWED, COSTS, checkBuy, checkStopMove, mandateEnd, roundDown, type Pos } from "./risk";
+import { COSTS, checkBuy, checkStopMove, mandateEnd, roundDown, slipFor, type Pos } from "./risk";
+import { resolve, liquidity, allowedAssets, CORE, watchlist } from "./universe";
 import { validate } from "./trading";
 
 // Mandato con dinero real. Teo decide qué comprar y dónde poner el stop; este archivo aplica los límites y habla con Kraken.
@@ -15,7 +16,8 @@ export async function liveMandate(uid: string) {
   return r[0] || null;
 }
 async function openPositions(mid: string) {
-  return q("select id, asset, pair, units::float8 as units, entry::float8 as entry, cost_aud::float8 as cost, sl::float8 as sl, tp::float8 as tp, sl_txid, rationale, opened_at from trading_positions where mandate_id=$1 and status='open' order by opened_at", [mid]);
+  const r = await q("select id, asset, pair, units::float8 as units, entry::float8 as entry, cost_aud::float8 as cost, sl::float8 as sl, tp::float8 as tp, sl_txid, rationale, opened_at from trading_positions where mandate_id=$1 and status='open' order by opened_at", [mid]);
+  return r.map((p: any) => ({ ...p, slip: slipFor(p.asset) }));
 }
 async function setCash(mid: string, cash: number) {
   await q("update trading_mandates set book = jsonb_set(book, '{cash}', to_jsonb($2::float8)) where id=$1", [mid, cash]);
@@ -36,12 +38,12 @@ export async function createLive(uid: string, m: { capital: number; floor: numbe
   const audFree = Number(bal.ZAUD ?? bal.AUD ?? 0);
   if (audFree + 0.01 < m.capital) throw new Error(`En Kraken hay ${aud(audFree)} y el mandato necesita ${aud(m.capital)}.`);
   await q("insert into trading_mandates (user_id, mode, capital, floor, target, book, params, last_t, live_from, approve_first) values ($1,'live',$2,$3,$4,$5,$6,0,$7,true)",
-    [uid, m.capital, m.floor, m.target, JSON.stringify({ cash: m.capital }), JSON.stringify({ allowed: ALLOWED, costs: COSTS }), liveFrom]);
+    [uid, m.capital, m.floor, m.target, JSON.stringify({ cash: m.capital }), JSON.stringify({ core: CORE, costs: COSTS }), liveFrom]);
   await logEvent(uid, "Vos", `Creaste un mandato con dinero real: ${aud(m.capital)}, piso ${aud(m.floor)}, objetivo ${aud(m.target)}`, `Opera desde ${liveFrom.toISOString()}; hasta entonces, ensayo. La primera orden real requiere tu aprobación.`);
 }
 
 async function priceOf(asset: string) {
-  const p = await ticker(ALLOWED[asset] || asset);
+  const p = await ticker((await resolve(asset)).pair);
   if (!p) throw new KrakenError(`No hay precio para ${asset}.`);
   return p;
 }
@@ -54,6 +56,17 @@ export async function liveEquity(m: any) {
   return { equity: v, positions: pos, marks };
 }
 
+// Todo lo que el control de riesgo necesita para una compra, leído de Kraken en el momento.
+async function buyContext(uid: string, m: any, asset: string) {
+  clearTickerCache();
+  const p = await resolve(asset), allowed = await allowedAssets(uid);
+  const liq = (await liquidity([p]))[p.asset];
+  if (!liq) throw new KrakenError(`No hay precio para ${asset}.`);
+  const pos = await openPositions(m.id), { equity } = await liveEquity(m);
+  const meta = { ordermin: p.ordermin, costmin: p.costmin, lotDecimals: p.lotDecimals, pairDecimals: p.pairDecimals };
+  return { p, allowed, liq, pos, equity, meta, price: liq.ask || liq.price };
+}
+
 type TradeIn = { asset: string; amount_aud: number; stop_loss: number; take_profit?: number | null; rationale: string };
 
 export async function placeTrade(uid: string, t: TradeIn) {
@@ -62,12 +75,10 @@ export async function placeTrade(uid: string, t: TradeIn) {
   const m = await liveMandate(uid);
   if (!m) throw new Error("No hay un mandato con dinero real en curso.");
   if (m.status !== "active") throw new Error("El mandato está en pausa.");
-  const asset = t.asset.toUpperCase(), pair = ALLOWED[asset];
-  if (!pair) throw new Error(`${asset} no está permitido. Monedas: ${Object.keys(ALLOWED).join(", ")}.`);
+  const asset = t.asset.toUpperCase();
   if (!t.rationale || t.rationale.trim().length < 20) throw new Error("Explicá el plan de la operación en al menos una oración.");
-  clearTickerCache();
-  const [price, meta, pos] = [await priceOf(asset), await pairMeta(pair), await openPositions(m.id)];
-  const c = checkBuy({ floor: Number(m.floor), cash: cashOf(m), positions: pos as Pos[], asset, amountAud: t.amount_aud, price, sl: t.stop_loss, tp: t.take_profit ?? null, meta });
+  const x = await buyContext(uid, m, asset), pair = x.p.pair, price = x.price;
+  const c = checkBuy({ floor: Number(m.floor), cash: cashOf(m), positions: x.pos as Pos[], asset, amountAud: t.amount_aud, price, sl: t.stop_loss, tp: t.take_profit ?? null, meta: x.meta, allowed: x.allowed, liq: x.liq, equity: x.equity });
   if (!c.ok) throw new Error(c.error);
   const summary = `Comprar ${c.volume} ${asset} (~${aud(t.amount_aud)}) a mercado, precio ~${price}. Stop ${c.sl}${c.tp ? `, take profit ${c.tp}` : ""}. Peor caso del mandato: ${aud(c.worst)}.`;
 
@@ -92,7 +103,7 @@ export async function placeTrade(uid: string, t: TradeIn) {
 }
 
 async function executeBuy(uid: string, m: any, t: { asset: string; amount_aud: number; sl: number; tp: number | null; rationale: string }, volume: number, refPrice: number) {
-  const pair = ALLOWED[t.asset], meta = await pairMeta(pair);
+  const pr = await resolve(t.asset), pair = pr.pair, meta = { lotDecimals: pr.lotDecimals };
   const o = await addOrder({ pair, type: "buy", ordertype: "market", volume: String(volume) });
   if (!o.txid) throw new Error("Kraken no devolvió el número de orden.");
   const f = await waitFilled(o.txid);
@@ -127,10 +138,9 @@ export async function executeIntentForProposal(uid: string, proposalId: string) 
   try {
     if (!m || m.status !== "active") throw new Error("El mandato ya no está activo.");
     if ((await currentUser()).paused) throw new Error("El sistema está en pausa.");
-    clearTickerCache();
-    const asset = it.asset, price = await priceOf(asset), meta = await pairMeta(ALLOWED[asset]), pos = await openPositions(m.id);
+    const asset = it.asset, x = await buyContext(uid, m, asset), price = x.price;
     // Se vuelve a controlar con el precio de ahora: entre la propuesta y tu aprobación pudo moverse.
-    const c = checkBuy({ floor: Number(m.floor), cash: cashOf(m), positions: pos as Pos[], asset, amountAud: Number(it.amount_aud), price, sl: Number(it.sl), tp: it.tp === null ? null : Number(it.tp), meta });
+    const c = checkBuy({ floor: Number(m.floor), cash: cashOf(m), positions: x.pos as Pos[], asset, amountAud: Number(it.amount_aud), price, sl: Number(it.sl), tp: it.tp === null ? null : Number(it.tp), meta: x.meta, allowed: x.allowed, liq: x.liq, equity: x.equity });
     if (!c.ok) throw new Error("Con el precio actual ya no cumple los límites: " + c.error);
     const r = await executeBuy(uid, m, { asset, amount_aud: Number(it.amount_aud), sl: c.sl, tp: c.tp, rationale: it.rationale }, c.volume, price);
     await q("update trading_intents set status='executed', result=$2 where id=$1", [it.id, `Compró ${r.unidades} ${asset} a ${r.precio}`]);
@@ -264,10 +274,13 @@ export async function endLive(uid: string) {
 }
 
 // Datos de mercado para que Teo decida: precio y estadísticas diarias de cada moneda permitida.
-export async function marketSnapshot() {
+export async function marketSnapshot(uid: string, assets?: string[]) {
   const out: any[] = [];
-  for (const [asset, pair] of Object.entries(ALLOWED)) {
+  const list = (assets && assets.length ? assets : await allowedAssets(uid)).map((a) => a.toUpperCase()).slice(0, 12);
+  for (const asset of list) {
+    let pair = asset;
     try {
+      pair = (await resolve(asset)).pair;
       const h = await ohlcDaily(pair), n = h.length, c = h.map((x) => x.c), last = c[n - 1];
       const sma = (k: number) => c.slice(-k).reduce((a, b) => a + b, 0) / k;
       let atr = 0; for (let i = n - 14; i < n; i++) atr += Math.max(h[i].h - h[i].l, Math.abs(h[i].h - h[i - 1].c), Math.abs(h[i].l - h[i - 1].c)); atr /= 14;
@@ -286,7 +299,8 @@ export async function liveState(uid: string, m: any) {
   const closed = await q("select asset, units::float8 as units, entry::float8 as entry, exit_price::float8 as exit, cost_aud::float8 as cost, proceeds_aud::float8 as proceeds, close_reason, closed_at from trading_positions where mandate_id=$1 and status='closed' order by closed_at desc limit 30", [m.id]);
   return {
     equity, cash: cashOf(m), liveFrom: m.live_from, rehearsal: !!(m.live_from && new Date(m.live_from).getTime() > now()), approveFirst: m.approve_first,
-    allowed: Object.keys(ALLOWED),
+    allowed: await allowedAssets(m.user_id),
+    watch: await watchlist(m.user_id),
     positions: positions.map((p) => ({ asset: p.asset, units: p.units, entry: p.entry, cost: p.cost, sl: p.sl, tp: p.tp, mark: marks[p.asset] ?? null, rationale: p.rationale, opened: p.opened_at })),
     intents, closed,
   };

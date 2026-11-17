@@ -101,3 +101,9 @@ Pruebas: `npm run test:unit` (firma de Kraken contra el ejemplo oficial y reglas
 - Solo vende unidades registradas en el mandato: no toca el resto de tus monedas.
 - Herramientas MCP de Teo: `market_snapshot`, `place_trade`, `close_position`, `update_stop`, `refresh_trading`, `check_trading_keys`.
 - Pruebas: `npm run test:unit` (incluye `scripts/risk-test.mjs`) y `npm test` con el Kraken simulado (órdenes, stops, take profit, objetivo y USDC).
+
+### Universo abierto y Nora (agente N)
+- Universo: todos los pares al contado de Kraken que cotizan en AUD, sin fiat ni estables (`lib/universe.ts`).
+- BTC, ETH, SOL y XRP siempre operables; cualquier otra moneda solo si está en la lista vigente de Nora (`set_watchlist`, hasta 10, vence a los 4 días).
+- Filtros de código al comprar: volumen 24 h ≥ AUD 150.000, spread ≤ 0,6 %, y fuera de las 4 principales, ≤ 35 % del patrimonio por moneda. El peor caso supone 1 % de deslizamiento en esas monedas (0,3 % en las principales).
+- xStocks y derivados de Kraken no están disponibles para cuentas minoristas en Australia.
