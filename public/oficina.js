@@ -329,6 +329,7 @@
     var flowRoot = new T.Group(), flows = [], flowSig = ""; scene.add(flowRoot);
     var FLOW_COLOR = { open: "#f0a020", in_progress: "#3b82f6", blocked: "#e5484d" };
     function anchor(code) {
+      if (code === "sistema") { var P = ROOMS.filter(function (r) { return r.id === "pla"; })[0]; return new T.Vector3(P.cx + 3.4, 1.9, P.cz); }
       if (code === "user") { var R = ROOMS.filter(function (r) { return r.id === "dec"; })[0]; return new T.Vector3(R.cx, 1.0, R.cz + 0.5); }
       var s = byCode[code]; return s ? new T.Vector3(s.pos.x, 1.55, s.pos.z + 0.2) : null;
     }

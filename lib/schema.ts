@@ -106,6 +106,20 @@ export const SCHEMA: string[] = [
      created_at timestamptz not null default now(),
      updated_at timestamptz not null default now())`,
   `create index if not exists agent_tasks_inbox on agent_tasks (user_id, to_code, status)`,
+  `create table if not exists source_status (
+     user_id uuid not null references users(id) on delete cascade,
+     source text not null,
+     ok boolean not null,
+     message text not null default '',
+     detail jsonb not null default '{}'::jsonb,
+     synced_at timestamptz not null default now(),
+     primary key (user_id, source))`,
+  `create table if not exists price_history (
+     asset text not null,
+     day date not null,
+     aud numeric not null,
+     primary key (asset, day))`,
+  `alter table net_worth_history alter column contributions drop not null`,
 ];
 
-export const TABLES = ["users", "accounts", "balances", "liabilities", "transactions", "net_worth_history", "agents", "agent_runs", "proposals", "events", "fiscal_items", "fx_rates", "agent_tasks"];
+export const TABLES = ["users", "accounts", "balances", "liabilities", "transactions", "net_worth_history", "agents", "agent_runs", "proposals", "events", "fiscal_items", "fx_rates", "agent_tasks", "source_status", "price_history"];

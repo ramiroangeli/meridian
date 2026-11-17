@@ -72,3 +72,14 @@ Los chats de Claude no se hablan entre sí. Se coordinan a través de Meridiano,
 4. El usuario ve todo en Tareas y en la Oficina 3D, puede asignar o cancelar tareas, y es el único que aprueba propuestas.
 
 Límites contra bucles: 40 tareas entre agentes por día, 12 abiertas por agente, sin duplicados ni autoasignación, y nada se mueve con el sistema en pausa.
+
+## Kraken y vigilancia
+
+- `lib/kraken.ts`: cliente de solo lectura (saldos y órdenes abiertas). No tiene funciones para operar ni retirar.
+- `lib/rules.ts`: reglas sin IA. Caída de más de 15% en 7 días despierta a Freya; suba de más de 25%, a Elio; una orden abierta hace más de 7 días, a Gael; datos con más de 35 días, a Lía; reserva fiscal corta, a Inés.
+- `lib/watch.ts`: sincroniza, guarda la foto mensual del patrimonio, corre las reglas y deja tareas (máximo 10 por día, sin duplicados).
+- `vercel.json`: corre la vigilancia todos los días a las 20:00 UTC. También se puede correr desde Sistema o con la herramienta `refresh_data`.
+
+Variables nuevas en Vercel: `KRAKEN_API_KEY`, `KRAKEN_API_SECRET` (clave exclusiva para Meridiano, solo con permisos de consulta) y `CRON_SECRET`.
+
+Pruebas: `npm run test:unit` (firma de Kraken contra el ejemplo oficial y reglas) y `npm test` con el servidor en marcha. Con `E2E_RESET=1` y un Kraken simulado se prueba también el paso a datos reales.

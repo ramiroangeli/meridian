@@ -185,6 +185,8 @@ summary{cursor:pointer;color:var(--accent);font-weight:500}
 .tmeta .btn{margin-left:auto}
 .of-tag u{text-decoration:none;background:var(--warn);color:#fff;border-radius:8px;font-size:10px;font-weight:700;padding:0 5px;margin-left:2px}
 .of-tag u:empty{display:none}
+.danger-zone{border-color:var(--crit)}
+.limit .sub{margin:2px 0 0;font-size:13px}
 /* decisiones */
 .prop{border:1px solid var(--line);border-left:4px solid var(--info);border-radius:8px;padding:14px;background:var(--surface);display:flex;flex-direction:column;gap:8px}
 .prop.urg{border-left-color:var(--crit)} .prop.rev{border-left-color:var(--warn)} .prop.idea{border-left-color:var(--muted)}
@@ -222,7 +224,7 @@ ul.plain{margin:0;padding-left:18px} ul.plain li{margin:3px 0}
   <aside class="rail">
     <div class="brand">Meridiano<small>Finanzas personales entre países, con agentes</small></div>
     <nav class="nav" id="nav" aria-label="Secciones"></nav>
-    <div class="rail-foot" id="foot">v0.2. Los datos salen de la base y los agentes cambian de estado cuando tu Claude lo informa por el conector.</div>
+    <div class="rail-foot" id="foot">v0.3. Los datos salen de la base; la vigilancia diaria y tu Claude mantienen a los agentes trabajando.</div>
   </aside>
   <main class="main">
     <div class="top">
@@ -244,7 +246,7 @@ ul.plain{margin:0;padding-left:18px} ul.plain li{margin:3px 0}
 (function(){
 "use strict";
 /* ---------- datos: llegan de /api/state ---------- */
-var FX,ZONES,ACCOUNTS,LIABS,MONTHS,NW_HIST,CONTRIB,FLOW,AGENTS,PROPS,HISTORY,FISCAL,COSTS,TASKS=[],USER={},deferred=false;
+var FX,ZONES,ACCOUNTS,LIABS,MONTHS,NW_HIST,CONTRIB,FLOW,AGENTS,PROPS,HISTORY,FISCAL,COSTS,TASKS=[],SOURCES={},USER={},deferred=false;
 var ST={prog:["Programado","idle","◷"],run:["Ejecutándose","info","▶"],wait:["Esperando datos","warn","◌"],appr:["Pendiente de aprobación","warn","▲"],done:["Completado","good","✓"],err:["Con error","crit","✕"],off:["En pausa","idle","Ⅱ"],idea:["Conceptual","idle","·"]};
 
 /* ---------- estado ---------- */
@@ -283,8 +285,9 @@ function attachTip(box,svg,handler){
 function lineChart(box){
   var W=640,H=250,L=58,R=118,T=14,B=28;
   var a=NW_HIST.slice();a[a.length-1]=net();
-  var series=[{n:"Patrimonio neto",v:a.map(conv),c:"var(--s1)"},{n:"Solo aportes",v:CONTRIB.map(conv),c:"var(--s2)"}];
-  var all=series[0].v.concat(series[1].v),lo=Math.min.apply(null,all),hi=Math.max.apply(null,all);
+  var series=[{n:"Patrimonio neto",v:a.map(conv),c:"var(--s1)"}];if(hasContrib())series.push({n:"Solo aportes",v:CONTRIB.map(conv),c:"var(--s2)"});
+  var all=[].concat.apply([],series.map(function(x){return x.v;})),lo=Math.min.apply(null,all),hi=Math.max.apply(null,all);
+  if(hi-lo<1){var pad=Math.max(Math.abs(hi)*0.05,100);lo-=pad;hi+=pad;}
   var step=Math.pow(10,Math.floor(Math.log10(hi-lo)));if((hi-lo)/step<3)step/=2;
   lo=Math.floor(lo/step)*step;hi=Math.ceil(hi/step)*step;
   function X(i){return L+(W-L-R)*i/(a.length-1);} function Y(v){return T+(H-T-B)*(1-(v-lo)/(hi-lo));}
@@ -292,7 +295,7 @@ function lineChart(box){
   for(var g=lo;g<=hi+1;g+=step){s+='<line x1="'+L+'" x2="'+(W-R)+'" y1="'+Y(g)+'" y2="'+Y(g)+'" stroke="var(--line)" stroke-width="1"/><text x="'+(L-8)+'" y="'+(Y(g)+4)+'" text-anchor="end">'+nf0.format(g/1000)+' mil</text>';}
   MONTHS.forEach(function(m,i){if(i%2===1||i===a.length-1)s+='<text x="'+X(i)+'" y="'+(H-8)+'" text-anchor="middle">'+m+'</text>';});
   var ends=series.map(function(se){return Y(se.v[se.v.length-1]);});
-  if(Math.abs(ends[0]-ends[1])<16){var mid=(ends[0]+ends[1])/2,up=ends[0]<ends[1]?0:1;ends[up]=mid-8;ends[1-up]=mid+8;}
+  if(ends.length>1&&Math.abs(ends[0]-ends[1])<16){var mid=(ends[0]+ends[1])/2,up=ends[0]<ends[1]?0:1;ends[up]=mid-8;ends[1-up]=mid+8;}
   series.forEach(function(se,k){
     var d=se.v.map(function(v,i){return (i?"L":"M")+X(i).toFixed(1)+" "+Y(v).toFixed(1);}).join(" ");
     s+='<path d="'+d+'" fill="none" stroke="'+se.c+'" stroke-width="2" stroke-linejoin="round"'+(k?' stroke-dasharray="5 4"':'')+'/>';
@@ -300,12 +303,13 @@ function lineChart(box){
     s+='<text class="lbl" x="'+(W-R+10)+'" y="'+(ends[k]+4)+'">'+se.n+'</text>';
   });
   s+='<line id="xh" x1="0" x2="0" y1="'+T+'" y2="'+(H-B)+'" stroke="var(--muted)" stroke-width="1" opacity="0"/></svg>';
-  box.innerHTML=s+'<div class="legend"><span><i style="background:var(--s1)"></i>Patrimonio neto</span><span><i style="background:var(--s2)"></i>Solo aportes (línea punteada)</span></div>';
+  box.innerHTML=s+'<div class="legend"><span><i style="background:var(--s1)"></i>Patrimonio neto</span><span'+(series[1]?'':' hidden')+'><i style="background:var(--s2)"></i>Solo aportes (línea punteada)</span></div>';
   var svg=box.querySelector("svg"),xh=svg.querySelector("#xh");
   attachTip(box,svg,function(fx){
     if(fx<0){xh.setAttribute("opacity",0);return null;}
     var i=Math.round((fx*W-L)/(W-L-R)*(a.length-1));if(i<0||i>=a.length){xh.setAttribute("opacity",0);return null;}
     xh.setAttribute("x1",X(i));xh.setAttribute("x2",X(i));xh.setAttribute("opacity",1);
+    if(!series[1])return {x:X(i)/W,y:Y(series[0].v[i])/H,html:MONTHS[i]+" · neto <b>"+nf0.format(series[0].v[i])+"</b>"};
     var diff=series[0].v[i]-series[1].v[i];
     return {x:X(i)/W,y:Y(Math.max(series[0].v[i],series[1].v[i]))/H,html:MONTHS[i]+" · neto <b>"+nf0.format(series[0].v[i])+"</b> · aportes <b>"+nf0.format(series[1].v[i])+"</b> · mercado y divisas <b>"+(diff>=0?"+":"")+nf0.format(diff)+"</b>"};
   });
@@ -338,36 +342,40 @@ function barList(pairs,total){
 }
 
 /* ---------- vistas ---------- */
+function hasContrib(){return CONTRIB.length>0&&CONTRIB.every(function(c){return c!==null&&c!==undefined;});}
+function lastFlow(){var n=FLOW.m.length-1;if(n<0)return null;var o={m:FLOW.m[n],i:FLOW.ingreso[n],e:FLOW.esencial[n],d:FLOW.discrecional[n],f:FLOW.fiscal[n]};o.s=o.i-o.e-o.d-o.f;return o;}
+function freeCash(){return sum(ACCOUNTS.filter(function(x){return (x.cls==="Efectivo"||x.cls==="Stablecoins")&&!/impuesto|fiscal/i.test(x.use+x.n);}),function(x){return x.aud;});}
+function emptyBox(t){return '<div class="empty">'+t+'</div>';}
 function meridian(){
-  var tot=assets();
+  var tot=assets();if(!ZONES.length)return "";
   var line='<div class="mer-line" aria-hidden="true">'+ZONES.map(function(z){var x=((z.lon+180)/360*100).toFixed(1);return '<span class="mer-tag" style="left:'+x+'%">'+z.id+'</span><span class="mer-dot" style="left:'+x+'%"></span>';}).join("")+'</div>';
   var cells=ZONES.slice().sort(function(x,y){return x.lon-y.lon;}).map(function(z){var acc=ACCOUNTS.filter(function(a){return a.zone===z.id;}),v=sum(acc,function(a){return a.aud;});
-    return '<div class="mer-cell"><b>'+z.name+'</b><span class="t" data-tz="'+z.tz+'">'+clock(z.tz)+'</span><span><span class="num">'+pct(v/tot)+'</span> de los activos · '+acc.length+' cuentas</span></div>';}).join("");
+    return '<div class="mer-cell"><b>'+z.name+'</b><span class="t" data-tz="'+z.tz+'">'+clock(z.tz)+'</span><span><span class="num">'+(tot?pct(v/tot):"–")+'</span> de los activos · '+acc.length+(acc.length===1?' cuenta':' cuentas')+'</span></div>';}).join("");
   return '<section class="meridian" aria-label="Activos por jurisdicción y hora local">'+line+'<div class="mer-grid">'+cells+'</div></section>';
 }
 var V={};
 V.resumen=function(){
-  var a=NW_HIST.slice();a[11]=net();var d=a[11]-a[10],d12=a[11]-a[0],contrib=CONTRIB[11]-CONTRIB[0];
-  var i=FLOW.ingreso[5],sav=i-FLOW.esencial[5]-FLOW.discrecional[5]-FLOW.fiscal[5];
-  var cash=sum(ACCOUNTS.filter(function(x){return x.cls==="Efectivo"&&x.n.indexOf("fiscal")<0;}),function(x){return x.aud;});
-  var stale=ACCOUNTS.filter(function(x){return quality(x.age)[1]==="crit";}).length;
-  var p=pending();
+  var a=NW_HIST.slice();if(a.length)a[a.length-1]=net();var n=a.length,d=n>1?a[n-1]-a[n-2]:null,lf=lastFlow(),fc=freeCash();
+  var stale=ACCOUNTS.filter(function(x){return quality(x.age)[1]==="crit";}).length,p=pending();
+  var story="";
+  if(n>1){var d12=a[n-1]-a[0];story=hasContrib()?'De los '+money(d12)+' de variación en '+(n-1)+' meses, '+money(CONTRIB[n-1]-CONTRIB[0])+' son aportes tuyos y '+money(d12-(CONTRIB[n-1]-CONTRIB[0]))+' son mercado y divisas.':'Variación de '+money(d12)+' en '+(n-1)+(n===2?' mes':' meses')+'. Separar aportes de mercado requiere importar tus movimientos.';}
   return meridian()+
   '<div class="grid g-4" style="margin-bottom:16px">'+
-   '<div class="tile"><div class="k">Patrimonio neto</div><div class="v">'+money(a[11])+'</div><div class="d"><span class="'+(d>=0?"up":"down")+'">'+(d>=0?"▲ ":"▼ ")+money(Math.abs(d))+'</span> en el mes</div></div>'+
-   '<div class="tile"><div class="k">Tasa de ahorro, noviembre</div><div class="v">'+pct(sav/i)+'</div><div class="d">'+money(sav)+' después de la reserva fiscal</div></div>'+
-   '<div class="tile"><div class="k">Meses de reserva</div><div class="v">'+nf1.format(cash/(FLOW.esencial[5]))+'</div><div class="d">Efectivo libre sobre gasto esencial</div></div>'+
-   '<div class="tile"><div class="k">Decisiones pendientes</div><div class="v">'+p.length+'</div><div class="d">'+(stale?stale+' cuentas con datos vencidos':'Todos los datos al día')+'</div></div>'+
+   '<div class="tile"><div class="k">Patrimonio neto</div><div class="v">'+money(net())+'</div><div class="d">'+(d===null?(ACCOUNTS.length?'Primer mes registrado':'Sin cuentas todavía'):'<span class="'+(d>=0?"up":"down")+'">'+(d>=0?"▲ ":"▼ ")+money(Math.abs(d))+'</span> en el mes')+'</div></div>'+
+   '<div class="tile"><div class="k">Tasa de ahorro'+(lf?', '+lf.m:'')+'</div><div class="v">'+(lf&&lf.i?pct(lf.s/lf.i):'–')+'</div><div class="d">'+(lf?money(lf.s)+' después de la reserva fiscal':'Requiere movimientos importados')+'</div></div>'+
+   '<div class="tile"><div class="k">Meses de reserva</div><div class="v">'+(lf&&lf.e?nf1.format(fc/lf.e):'–')+'</div><div class="d">'+(lf&&lf.e?'Efectivo libre sobre gasto esencial':'Efectivo libre: '+money(fc))+'</div></div>'+
+   '<div class="tile"><div class="k">Decisiones pendientes</div><div class="v">'+p.length+'</div><div class="d">'+(stale?stale+(stale===1?' cuenta con datos vencidos':' cuentas con datos vencidos'):'Todos los datos al día')+'</div></div>'+
   '</div>'+
   '<div class="grid g-2">'+
-   '<section class="panel"><h2>Evolución del patrimonio</h2><p class="sub">De los '+money(d12)+' ganados en 12 meses, '+money(contrib)+' son aportes tuyos y '+money(d12-contrib)+' son mercado y divisas.</p><div class="chart" id="c-nw"></div>'+
-    '<details><summary>Ver como tabla</summary><div class="scroll"><table><tr><th>Mes</th><th class="r">Neto</th><th class="r">Aportes</th></tr>'+MONTHS.map(function(m,k){return '<tr><td>'+m+'</td><td class="r num">'+nf0.format(conv(a[k]))+'</td><td class="r num">'+nf0.format(conv(CONTRIB[k]))+'</td></tr>';}).join("")+'</table></div></details></section>'+
+   '<section class="panel"><h2>Evolución del patrimonio</h2>'+(n>1?'<p class="sub">'+story+'</p><div class="chart" id="c-nw"></div>'+
+    '<details><summary>Ver como tabla</summary><div class="scroll"><table><tr><th>Mes</th><th class="r">Neto</th>'+(hasContrib()?'<th class="r">Aportes</th>':'')+'</tr>'+MONTHS.map(function(m,k){return '<tr><td>'+m+'</td><td class="r num">'+nf0.format(conv(a[k]))+'</td>'+(hasContrib()?'<td class="r num">'+nf0.format(conv(CONTRIB[k]))+'</td>':'')+'</tr>';}).join("")+'</table></div></details>'
+    :emptyBox('El gráfico aparece desde el segundo mes con datos. La vigilancia diaria guarda una foto del patrimonio cada mes.'))+'</section>'+
    '<section class="panel"><h2>Requiere tu atención</h2><p class="sub">Propuestas de los agentes, de más a menos urgente.</p><div class="grid" style="gap:10px">'+
-    (p.length?p.slice(0,3).map(function(x){return '<a href="#decisiones" style="text-decoration:none;color:inherit"><div class="prop '+x.lvl+'" style="padding:10px 12px"><div class="meta"><span>'+x.lbl+'</span><span>Agente '+x.ag+'</span></div><div style="font-weight:600">'+esc(x.t)+'</div></div></a>';}).join(""):'<div class="empty">No hay nada pendiente.</div>')+
+    (p.length?p.slice(0,3).map(function(x){return '<a href="#decisiones" style="text-decoration:none;color:inherit"><div class="prop '+x.lvl+'" style="padding:10px 12px"><div class="meta"><span>'+x.lbl+'</span><span>'+esc(who(x.ag))+'</span></div><div style="font-weight:600">'+esc(x.t)+'</div></div></a>';}).join(""):emptyBox('No hay nada pendiente.'))+
    '</div></section>'+
   '</div>';
 };
-V.resumen.after=function(){lineChart(document.getElementById("c-nw"));};
+V.resumen.after=function(){var b=document.getElementById("c-nw");if(b)lineChart(b);};
 V.cuentas=function(){
   var rows=ACCOUNTS.map(function(a){var q=quality(a.age);
     return '<tr><td><b style="font-weight:600">'+esc(a.n)+'</b><br><span style="color:var(--muted);font-size:13px">'+esc(a.type)+' · '+esc(a.use)+'</span></td><td>'+zoneName(a.zone)+'</td><td class="r num">'+(a.nat===null?"":a.cur+" "+(a.cur==="BTC"?String(a.nat).replace(".",","):nf0.format(a.nat)))+'</td><td class="r num">'+money(a.aud)+'</td><td>'+pill(q[0],q[1])+'<br><span style="color:var(--muted);font-size:12px">'+ageText(a.age)+'</span></td></tr>';}).join("");
@@ -377,29 +385,36 @@ V.cuentas=function(){
   '<section class="panel"><h2>Pasivos y compromisos</h2><div class="scroll"><table><tr><th>Concepto</th><th>País</th><th class="r">En '+state.base+'</th></tr>'+lrows+'</table></div></section>';
 };
 V.caja=function(){
-  var i=FLOW.ingreso[5],e=FLOW.esencial[5],d=FLOW.discrecional[5],f=FLOW.fiscal[5];
+  var lf=lastFlow(),fc=freeCash();
+  if(!lf)return '<section class="panel"><h2>Flujo de caja</h2>'+emptyBox('Todavía no hay movimientos. Cuando importes los extractos de tus bancos o de Money Lover, acá vas a ver ingreso, gasto, reserva fiscal y ahorro de cada mes.')+'<div class="limit" style="margin-top:12px"><span>Efectivo libre hoy</span><span class="num">'+money(fc)+'</span></div></section>';
+  var i=lf.i,e=lf.e,d=lf.d,f=lf.f,s=lf.s,k=FLOW.m.length,avg=0;
+  for(var j=0;j<k;j++)avg+=FLOW.ingreso[j]-FLOW.esencial[j]-FLOW.discrecional[j]-FLOW.fiscal[j];avg/=k;
   return '<div class="grid g-4" style="margin-bottom:16px">'+
-  '<div class="tile"><div class="k">Ingreso, noviembre</div><div class="v">'+money(i)+'</div></div>'+
-  '<div class="tile"><div class="k">Gasto total</div><div class="v">'+money(e+d)+'</div><div class="d">'+pct((e+d)/i)+' del ingreso</div></div>'+
-  '<div class="tile"><div class="k">Reserva fiscal apartada</div><div class="v">'+money(f)+'</div><div class="d">22% de cada cobro</div></div>'+
-  '<div class="tile"><div class="k">Ahorro</div><div class="v">'+money(i-e-d-f)+'</div><div class="d">'+pct((i-e-d-f)/i)+' del ingreso</div></div></div>'+
+  '<div class="tile"><div class="k">Ingreso, '+lf.m+'</div><div class="v">'+money(i)+'</div></div>'+
+  '<div class="tile"><div class="k">Gasto total</div><div class="v">'+money(e+d)+'</div><div class="d">'+(i?pct((e+d)/i)+' del ingreso':'')+'</div></div>'+
+  '<div class="tile"><div class="k">Reserva fiscal apartada</div><div class="v">'+money(f)+'</div><div class="d">'+(i?pct(f/i)+' de lo cobrado':'')+'</div></div>'+
+  '<div class="tile"><div class="k">Ahorro</div><div class="v">'+money(s)+'</div><div class="d">'+(i?pct(s/i)+' del ingreso':'')+'</div></div></div>'+
   '<div class="grid g-2"><section class="panel"><h2>Destino del ingreso</h2><p class="sub">Cada barra suma el ingreso del mes, en '+state.base+'.</p><div class="chart" id="c-flow"></div></section>'+
-  '<section class="panel"><h2>Previsión de liquidez a 90 días</h2><p class="sub">Efectivo libre proyectado con ingresos y gastos promedio.</p>'+
-   [["Hoy",0],["En 30 días",1],["En 60 días",2],["En 90 días",3]].map(function(x){var base=sum(ACCOUNTS.filter(function(a){return a.cls==="Efectivo"&&a.n.indexOf("fiscal")<0;}),function(a){return a.aud;});return '<div class="limit"><span>'+x[0]+'</span><span class="num">'+money(base+x[1]*(i-e-d-f))+'</span></div>';}).join("")+
+  '<section class="panel"><h2>Previsión de liquidez a 90 días</h2><p class="sub">Efectivo libre proyectado con el ahorro promedio de '+k+(k===1?' mes':' meses')+'.</p>'+
+   [["Hoy",0],["En 30 días",1],["En 60 días",2],["En 90 días",3]].map(function(x){return '<div class="limit"><span>'+x[0]+'</span><span class="num">'+money(fc+x[1]*avg)+'</span></div>';}).join("")+
    '</section></div>';
 };
-V.caja.after=function(){flowChart(document.getElementById("c-flow"));};
+V.caja.after=function(){var b=document.getElementById("c-flow");if(b)flowChart(b);};
 V.cartera=function(){
-  var tot=assets(),cls=group("cls"),cur=group("cur").map(function(p){return [p[0]==="Varias"?"Otras cripto":p[0],p[1]];}),zon=group("zone").map(function(p){return [zoneName(p[0]),p[1]];});
-  var crypto=sum(ACCOUNTS.filter(function(a){return a.cls==="Bitcoin"||a.cls==="Otras cripto";}),function(a){return a.aud;}),btc=sum(ACCOUNTS.filter(function(a){return a.cls==="Bitcoin";}),function(a){return a.aud;});
+  var tot=assets();
+  if(!tot)return '<section class="panel"><h2>Cartera</h2>'+emptyBox('Sin activos valuados todavía. Configurá Kraken o cargá tus cuentas para ver la asignación.')+'</section>';
+  var cls=group("cls"),cur=group("cur").map(function(p){return [p[0]==="Varias"?"Otras cripto":p[0],p[1]];}),zon=group("zone").map(function(p){return [zoneName(p[0]),p[1]];});
+  var isC=function(a){return a.cls==="Bitcoin"||a.cls==="Otras cripto";};
+  var crypto=sum(ACCOUNTS.filter(isC),function(a){return a.aud;}),btc=sum(ACCOUNTS.filter(function(a){return a.cls==="Bitcoin";}),function(a){return a.aud;});
   var big=cls[0];
-  function lim(name,val,rule,ok){return '<div class="limit"><span>'+name+'<br><span style="color:var(--muted);font-size:13px">'+rule+'</span></span><span style="text-align:right"><span class="num">'+pct(val)+'</span><br>'+pill(ok?"Dentro del límite":"Fuera del límite",ok?"good":"crit",ok?"✓":"✕")+'</span></div>';}
+  function lim(name,val,rule,ok){return '<div class="limit"><span>'+name+'<br><span style="color:var(--muted);font-size:13px">'+rule+'</span></span><span style="text-align:right"><span class="num">'+(val===null?"–":pct(val))+'</span><br>'+(val===null?pill("Sin datos","idle"):pill(ok?"Dentro del límite":"Fuera del límite",ok?"good":"crit",ok?"✓":"✕"))+'</span></div>';}
   return '<div class="grid g-2">'+
   '<section class="panel"><h2>Por clase de activo</h2><p class="sub">Porcentaje sobre activos totales.</p>'+barList(cls,tot)+'</section>'+
   '<section class="panel"><h2>Límites de la política de inversión</h2><p class="sub">Reglas de ejemplo. Las tuyas se escriben antes de automatizar nada.</p>'+
    lim("Criptomonedas sobre activos",crypto/tot,"Máximo 25%",crypto/tot<=0.25)+
-   lim("Bitcoin dentro de cripto",btc/crypto,"Mínimo 50%",btc/crypto>=0.5)+
-   lim("Mayor clase: "+big[0],big[1]/tot,"Máximo 45% en una sola clase",big[1]/tot<=0.45)+'</section>'+
+   lim("Bitcoin dentro de cripto",crypto?btc/crypto:null,"Mínimo 50%",crypto?btc/crypto>=0.5:true)+
+   lim("Mayor clase: "+big[0],big[1]/tot,"Máximo 45% en una sola clase",big[1]/tot<=0.45)+
+   (USER.demo?'':'<p class="sub" style="margin-top:10px">Con datos parciales, estos porcentajes describen solo las cuentas cargadas, no tu patrimonio completo.</p>')+'</section>'+
   '<section class="panel"><h2>Por moneda del saldo</h2><p class="sub">La moneda de la cuenta no siempre es la exposición económica.</p>'+barList(cur,tot)+'</section>'+
   '<section class="panel"><h2>Por país de la cuenta</h2><p class="sub">Dónde está custodiado cada activo.</p>'+barList(zon,tot)+'</section>'+
   '</div>';
@@ -473,8 +488,8 @@ function pickAgent(code){
   if(current()==="sala"&&sala){sala.select(code,true);var a=AGENTS.filter(function(x){return x.c===code;})[0];document.getElementById("sala-ficha").innerHTML=ficha(a);return;}
   render();var f=document.querySelector(".ficha");if(f&&window.innerWidth<=860)f.scrollIntoView({block:"start"});
 }
-function who(code){if(code==="user")return "Vos";var a=AGENTS.filter(function(x){return x.c===code;})[0];return a?(a.p||a.n):code;}
-function whoDot(code){if(code==="user")return '<i class="adot" style="background:var(--ink)"></i>';var a=AGENTS.filter(function(x){return x.c===code;})[0];return areaDot(a?a.area:"");}
+function who(code){if(code==="user")return "Vos";if(code==="sistema")return "Vigilancia";var a=AGENTS.filter(function(x){return x.c===code;})[0];return a?(a.p||a.n):code;}
+function whoDot(code){if(code==="sistema")return '<i class="adot" style="background:var(--muted)"></i>';if(code==="user")return '<i class="adot" style="background:var(--ink)"></i>';var a=AGENTS.filter(function(x){return x.c===code;})[0];return areaDot(a?a.area:"");}
 function activeTasks(){return TASKS.filter(function(t){return t.st==="open"||t.st==="in_progress"||t.st==="blocked";});}
 var TST={open:["Abierta","info"],in_progress:["En curso","info"],blocked:["Bloqueada","crit"],done:["Hecha","good"],cancelled:["Cancelada","idle"]};
 V.tareas=function(){
@@ -522,16 +537,28 @@ V.conexiones=function(){
   return '<section class="panel"><h2>Estado y calidad de cada conexión</h2><p class="sub">Al día: menos de 3 días. Envejecido: hasta 30 días. Vencido: más de 30 días.</p><div class="scroll"><table><tr><th>Fuente</th><th>Método</th><th>Permiso</th><th>Último dato</th><th>Calidad</th><th>Qué hacer</th></tr>'+rows+'</table></div></section>'+
   '<section class="panel" style="margin-top:16px"><h2>Reglas de conexión</h2><ul class="plain"><li>Ninguna conexión guarda contraseñas, claves privadas ni frases de recuperación.</li><li>Las claves de API se crean con permiso de consulta, sin operación ni retiro.</li><li>Los conectores son intercambiables: archivo CSV, API o agregador bancario, sin cambiar el resto del sistema.</li></ul></section>';
 };
+function sourcesPanel(){
+  var S=SOURCES||{},k=S.kraken,w=S.watch;
+  var kst=USER.demo?pill("Inactiva con datos de ejemplo","idle"):!S.krakenConfigured?pill("Sin configurar","idle"):!k?pill("Sin sincronizar","idle"):k.ok?pill("Al día","good","✓"):pill("Con error","crit","✕");
+  var wst=!w?pill("Sin corridas","idle"):w.detail&&w.detail.alerts&&w.detail.alerts.length?pill(w.detail.alerts.length+(w.detail.alerts.length===1?" alerta":" alertas"),"warn","▲"):pill("Sin novedades","good","✓");
+  return '<section class="panel" style="margin-bottom:16px"><h2>Fuentes de datos y vigilancia</h2><p class="sub">La vigilancia es código, no IA: trae datos, aplica reglas y solo despierta a un agente cuando hay algo.</p>'+
+  '<div class="limit"><span><b style="font-weight:600">Kraken</b>, solo lectura<br><span class="sub">'+esc(USER.demo?"Se activa al empezar con tus datos.":k?k.msg+" · "+k.ago:S.krakenConfigured?"Configurada, sin sincronizar todavía.":"Faltan KRAKEN_API_KEY y KRAKEN_API_SECRET en Vercel.")+'</span></span><span>'+kst+'</span></div>'+
+  '<div class="limit"><span><b style="font-weight:600">Revisión automática</b><br><span class="sub">'+esc(S.cron?"Todos los días a las 17:00 de Córdoba.":"Falta CRON_SECRET en Vercel; por ahora solo corre a mano.")+(w?" Última: "+esc(w.ago)+". "+esc(w.msg):"")+'</span></span><span>'+wst+'</span></div>'+
+  '<div class="tform-acts" style="margin-top:12px"><button type="button" class="btn primary" data-sync'+(USER.demo?' disabled':'')+'>Sincronizar y revisar ahora</button><span id="syncMsg" role="status"></span></div></section>'+
+  (USER.demo?'<section class="panel danger-zone" style="margin-bottom:16px"><h2>Empezar con tus datos</h2><p class="sub">Borra todos los datos de ejemplo: cuentas, movimientos, propuestas, tareas, historial y calendario. Se conservan los agentes, sus instrucciones y tu conector. No se puede deshacer.</p>'+
+   '<form id="resetForm" class="tform"><label>Escribí BORRAR para confirmar<input id="resetConfirm" autocomplete="off" spellcheck="false"></label><div class="tform-acts" style="align-self:end"><button class="btn danger" type="submit">Borrar datos de ejemplo</button><span id="resetMsg" role="status"></span></div></form></section>':'');
+}
 V.sistema=function(){
   var tot=sum(COSTS,function(c){return c[1];}),url=location.origin+'/api/k/TU_TOKEN/mcp';
   return '<div class="grid g-4" style="margin-bottom:16px"><div class="tile"><div class="k">Costo mensual del sistema</div><div class="v">'+money(tot)+'</div><div class="d">Los agentes usan tu suscripción de Claude</div></div><div class="tile"><div class="k">Agentes implementados</div><div class="v">'+AGENTS.filter(function(a){return a.st!=="idea";}).length+' de '+AGENTS.length+'</div><div class="d">Con al menos una ejecución registrada</div></div><div class="tile"><div class="k">Propuestas pendientes</div><div class="v">'+PROPS.length+'</div><div class="d">Esperan tu decisión</div></div></div>'+
   '<section class="panel" style="margin-bottom:16px"><h2>Conectar tu Claude</h2><p class="sub">Tu Claude es el motor de los agentes. Este sistema guarda los datos, aplica los permisos y muestra el resultado.</p><ol class="plain"><li>En Claude, agregá un conector personalizado con esta dirección: <span class="num">'+esc(url)+'</span></li><li>Reemplazá TU_TOKEN por el valor de la variable MCP_TOKEN del despliegue. Tratalo como una contraseña.</li><li>Pedile a Claude: “revisá el estado del sistema en Meridiano”. Debe responder con las reglas y la antigüedad de cada dato.</li></ol></section>'+
+  sourcesPanel()+
   '<div class="two">'+
   '<section class="panel"><h2>Costo por componente</h2>'+COSTS.map(function(c){return '<div class="limit"><span>'+c[0]+'</span><span class="num">'+money(c[1])+'</span></div>';}).join("")+'</section>'+
   '<section class="panel"><h2>Permisos</h2><p class="sub">Qué hace el sistema solo y qué necesita tu autorización.</p><div class="two" style="gap:10px"><div><b style="font-weight:600">Automático</b><ul class="plain"><li>Importar y clasificar</li><li>Conciliar</li><li>Reportes y alertas</li><li>Simulaciones</li><li>Borradores de órdenes</li></ul></div><div><b style="font-weight:600">Con tu autorización</b><ul class="plain"><li>Compras y ventas</li><li>Transferencias y retiros</li><li>Cambios de permisos</li><li>Contratar productos</li><li>Presentaciones fiscales</li></ul></div></div></section>'+
   '</div>'+
   '<section class="panel" style="margin-top:16px"><h2>Etapas de construcción</h2><p class="sub">Cada etapa se cierra con un entregable que se puede comprobar.</p><div class="steps">'+
-   [["done","1. Prototipo","Pantallas y agentes con datos de ejemplo"],["now","2. Base y conector","Base de datos, conector MCP y tablero en vivo"],["","3. Primer agente","Contabilidad, corriendo en tu Claude"],["","4. Más agentes","Uno por vez, midiendo utilidad y costo"],["done","5. Oficina 3D","Nueve salas por área, navegables"],["","6. Otros usuarios","Cuentas separadas y revisión regulatoria"]].map(function(s){return '<div class="step '+s[0]+'"><b>'+s[1]+'</b><span>'+s[2]+'</span></div>';}).join("")+'</div></section>';
+   [["done","1. Prototipo","Pantallas y agentes con datos de ejemplo"],["done","2. Base y conector","Base de datos, conector MCP y tablero en vivo"],["now","3. Datos reales","Kraken sincronizado y vigilancia diaria"],["","4. Más agentes","Uno por vez, midiendo utilidad y costo"],["done","5. Oficina 3D","Nueve salas por área, navegables"],["","6. Otros usuarios","Cuentas separadas y revisión regulatoria"]].map(function(s){return '<div class="step '+s[0]+'"><b>'+s[1]+'</b><span>'+s[2]+'</span></div>';}).join("")+'</div></section>';
 };
 
 /* ---------- render ---------- */
@@ -555,6 +582,10 @@ document.getElementById("view").addEventListener("click",function(e){
   if(st){pickAgent(st.dataset.agent);return;}
   var b=e.target.closest("[data-act]");
   if(b){b.disabled=true;post("/api/proposals/"+b.dataset.id,{action:b.dataset.act});return;}
+  var sy=e.target.closest("[data-sync]");
+  if(sy){sy.disabled=true;var sm=document.getElementById("syncMsg");sm.textContent="Sincronizando y revisando…";
+    fetch("/api/sync",{method:"POST",credentials:"same-origin"}).then(function(r){if(r.status===401){location.href="/login";return;}return r.json().then(function(j){sm.textContent=j.summary||"Listo.";sy.disabled=false;setTimeout(load,300);});})
+    .catch(function(){sm.textContent="No se pudo conectar. Revisá tu conexión.";sy.disabled=false;});return;}
   var cx=e.target.closest("[data-cancel]");
   if(cx){cx.disabled=true;post("/api/tasks/"+cx.dataset.cancel,{});}
 });
@@ -564,8 +595,14 @@ document.getElementById("view").addEventListener("input",function(e){
 });
 document.getElementById("view").addEventListener("focusout",function(){setTimeout(function(){if(deferred&&!inForm()){deferred=false;render();}},0);});
 function val(id){var el=document.getElementById(id);return el?el.value:"";}
-function inForm(){var a=document.activeElement;return !!(a&&a.closest&&a.closest("#taskForm"));}
+function inForm(){var a=document.activeElement;return !!(a&&a.closest&&a.closest("form"));}
 document.getElementById("view").addEventListener("submit",function(e){
+  if(e.target.id==="resetForm"){e.preventDefault();
+    var rm=document.getElementById("resetMsg");if(val("resetConfirm").trim()!=="BORRAR"){rm.textContent="Escribí BORRAR, en mayúsculas, para confirmar.";return;}
+    rm.textContent="Borrando…";
+    fetch("/api/reset",{method:"POST",credentials:"same-origin",headers:{"content-type":"application/json"},body:JSON.stringify({confirm:"BORRAR"})})
+    .then(function(r){return r.json().then(function(j){if(!r.ok){rm.textContent=j.error||"No se pudo completar.";return;}document.activeElement&&document.activeElement.blur&&document.activeElement.blur();lastJson="";load();});})
+    .catch(function(){rm.textContent="No se pudo conectar. Revisá tu conexión.";});return;}
   if(e.target.id!=="taskForm")return;e.preventDefault();
   var msg=document.getElementById("tf-msg"),btn=e.target.querySelector("button[type=submit]");btn.disabled=true;msg.textContent="Asignando…";
   fetch("/api/tasks",{method:"POST",credentials:"same-origin",headers:{"content-type":"application/json"},body:JSON.stringify({to:val("tf-to"),priority:val("tf-pr"),title:val("tf-title").trim(),detail:val("tf-detail").trim()})})
@@ -579,7 +616,7 @@ setInterval(function(){document.querySelectorAll("[data-tz]").forEach(function(e
 var lastJson="";
 function apply(d,json){
   var first=!lastJson;lastJson=json;
-  FX=d.fx;ZONES=d.zones;ACCOUNTS=d.accounts;LIABS=d.liabs;MONTHS=d.months;NW_HIST=d.nwHist;CONTRIB=d.contrib;FLOW=d.flow;PROPS=d.props;TASKS=d.tasks||[];HISTORY=d.history;FISCAL=d.fiscal;COSTS=d.costs;USER=d.user;
+  FX=d.fx;ZONES=d.zones;ACCOUNTS=d.accounts;LIABS=d.liabs;MONTHS=d.months;NW_HIST=d.nwHist;CONTRIB=d.contrib;FLOW=d.flow;PROPS=d.props;TASKS=d.tasks||[];SOURCES=d.sources||{};HISTORY=d.history;FISCAL=d.fiscal;COSTS=d.costs;USER=d.user;
   if(AGENTS&&AGENTS.length===d.agents.length){d.agents.forEach(function(a,i){Object.assign(AGENTS[i],a);});}else{AGENTS=d.agents;}
   state.paused=d.paused;if(first&&FX[d.base])state.base=d.base;
   document.getElementById("demoBadge").hidden=!USER.demo;
@@ -587,7 +624,7 @@ function apply(d,json){
     sala.update(officeData());var a=AGENTS.filter(function(x){return x.c===state.agent;})[0];if(a)document.getElementById("sala-ficha").innerHTML=ficha(a);
     document.getElementById("pause").textContent=state.paused?"Reanudar agentes":"Pausar agentes";document.getElementById("pause").className=state.paused?"btn primary":"btn danger";document.getElementById("pausedBanner").hidden=!state.paused;return;
   }
-  if(current()==="tareas"&&inForm()){deferred=true;return;}
+  if(inForm()){deferred=true;return;}
   render();
 }
 function load(){

@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "node scripts/e2e.mjs"
+    "test": "node scripts/e2e.mjs",
+    "test:unit": "node --experimental-strip-types scripts/unit.mjs"
   },
   "keywords": [],
   "author": "",

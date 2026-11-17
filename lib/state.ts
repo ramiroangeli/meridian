@@ -59,6 +59,8 @@ export async function buildState() {
                case priority when 'alta' then 0 when 'normal' then 1 else 2 end, updated_at desc limit 80`, [uid]);
   const inbox: Record<string, number> = {};
   for (const t of tasks) if (["open", "in_progress", "blocked"].includes(t.status)) inbox[t.to_code] = (inbox[t.to_code] || 0) + 1;
+  const status = await q("select source, ok, message, detail, synced_at from source_status where user_id=$1", [uid]);
+  const src = (s: string) => { const r = status.find((x) => x.source === s); return r ? { ok: r.ok, msg: r.message, ago: rel(r.synced_at, ""), detail: r.detail } : null; };
   const months = [...new Set(tx.map((r) => r.m as string))].slice(-6);
   const pick = (m: string, f: (r: any) => boolean) => Math.abs(tx.filter((r) => r.m === m && f(r)).reduce((t, r) => t + r.total, 0));
   const h = hist.reverse();
@@ -81,6 +83,7 @@ export async function buildState() {
     months: h.map((r) => mes(r.month)),
     nwHist: h.map((r) => r.net),
     contrib: h.map((r) => r.c),
+    sources: { kraken: src("kraken"), watch: src("watch"), krakenConfigured: !!(process.env.KRAKEN_API_KEY && process.env.KRAKEN_API_SECRET), cron: !!process.env.CRON_SECRET },
     flow: {
       m: months.map(mes),
       ingreso: months.map((m) => pick(m, (r) => r.kind === "income")),

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { q, currentUser, logEvent } from "./db";
 import { latestBalances, agentRows, rel } from "./state";
+import { runWatch } from "./watch";
 
 /*
  Herramientas que el Claude del usuario usa como motor de los agentes.
@@ -319,5 +320,18 @@ export function registerTaskTools(server: any) {
     const verb: Record<string, string> = { in_progress: "Empezó", blocked: "Bloqueada", done: "Completó", cancelled: "Canceló" };
     await logEvent(u.id, `Agente ${code}`, `${verb[a.status]}: ${t.title}`, a.result);
     return ok({ task_id: t.id, estado: a.status });
+  });
+}
+
+export function registerWatchTools(server: any) {
+  server.registerTool("refresh_data", {
+    title: "Actualizar datos",
+    description: "Sincroniza Kraken en solo lectura, actualiza tipos de cambio y corre las reglas de vigilancia. Usalo antes de analizar saldos o precios. Como máximo una vez cada 5 minutos.",
+    inputSchema: z.object({}),
+  }, async () => {
+    const u = await currentUser();
+    const last = await q("select synced_at from source_status where user_id=$1 and source='watch' and synced_at > now() - interval '5 minutes'", [u.id]);
+    if (last.length) return fail("Los datos se actualizaron hace menos de 5 minutos. Usá list_accounts para leerlos.");
+    return ok(await runWatch("agente"));
   });
 }
