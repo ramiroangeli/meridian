@@ -1,11 +1,11 @@
 import { createMcpHandler } from "mcp-handler";
-import { registerTools } from "@/lib/mcp-tools";
+import { registerTools, registerTaskTools } from "@/lib/mcp-tools";
 import { mcpTokenOk } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const handler = createMcpHandler((server) => registerTools(server));
+const handler = createMcpHandler((server) => { registerTools(server); registerTaskTools(server); });
 
 async function guarded(req: Request, ctx: { params: Promise<{ token: string }> }) {
   const { token } = await ctx.params;

@@ -273,7 +273,7 @@
           s.icon = new T.Sprite(new T.SpriteMaterial({ map: iconFor(a.st), depthTest: false })); s.icon.scale.set(0.34, 0.34, 1); s.icon.position.set(0, ghost ? 1.25 : 1.98, 0); s.icon.renderOrder = 5; g.add(s.icon);
           s.hit = new T.Mesh(new T.CylinderGeometry(0.95, 0.95, 2.1, 10), new T.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false })); s.hit.position.set(0, 1.05, 0.4); s.hit.userData.code = a.c; g.add(s.hit); picks.push(s.hit);
           s.top = new T.Vector3(s.pos.x, ghost ? 1.75 : 2.38, s.pos.z);
-          var tag = document.createElement("button"); tag.type = "button"; tag.className = "of-tag"; tag.innerHTML = "<i></i><b></b><span></span>";
+          var tag = document.createElement("button"); tag.type = "button"; tag.className = "of-tag"; tag.innerHTML = "<i></i><b></b><span></span><u></u>";
           tag.addEventListener("click", function () { stopTour(); if (opts.onSelect) opts.onSelect(a.c); }); overlay.appendChild(tag); s.tag = tag;
           stations.push(s); byCode[a.c] = s;
         });
@@ -288,6 +288,7 @@
         s.tag.firstChild.style.background = STATE_COLOR[st] || STATE_COLOR.prog;
         s.tag.children[1].textContent = s.ghost ? "Vacante" : String(a.p).split(" ")[0];
         s.tag.children[2].textContent = " · " + a.title;
+        s.tag.children[3].textContent = a.inbox ? String(a.inbox) : "";
         s.tag.title = a.p + ", " + a.title + ": " + a.label;
         s.tag.setAttribute("aria-pressed", a.c === selected);
       });
@@ -324,13 +325,39 @@
       });
     }
 
+    // ---------- tareas entre agentes: arcos con paquetes que viajan de un puesto a otro ----------
+    var flowRoot = new T.Group(), flows = [], flowSig = ""; scene.add(flowRoot);
+    var FLOW_COLOR = { open: "#f0a020", in_progress: "#3b82f6", blocked: "#e5484d" };
+    function anchor(code) {
+      if (code === "user") { var R = ROOMS.filter(function (r) { return r.id === "dec"; })[0]; return new T.Vector3(R.cx, 1.0, R.cz + 0.5); }
+      var s = byCode[code]; return s ? new T.Vector3(s.pos.x, 1.55, s.pos.z + 0.2) : null;
+    }
+    function buildFlows(tasks) {
+      flowRoot.traverse(function (o) { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });
+      while (flowRoot.children.length) flowRoot.remove(flowRoot.children[0]);
+      flows = [];
+      tasks.forEach(function (t, i) {
+        var a = anchor(t.from), b = anchor(t.to); if (!a || !b) return;
+        var mid = a.clone().add(b).multiplyScalar(0.5); mid.y = 2.4 + a.distanceTo(b) * 0.2;
+        var curve = new T.QuadraticBezierCurve3(a, mid, b), c = col(FLOW_COLOR[t.st] || FLOW_COLOR.open);
+        var tube = new T.Mesh(new T.TubeGeometry(curve, 48, 0.055, 8, false), new T.MeshBasicMaterial({ color: c, transparent: true, opacity: t.st === "blocked" ? 0.9 : 0.78, depthWrite: false }));
+        tube.renderOrder = 3; flowRoot.add(tube);
+        var dots = [0, 1].map(function () { var d = new T.Mesh(new T.SphereGeometry(0.16, 14, 10), new T.MeshBasicMaterial({ color: c })); d.renderOrder = 4; flowRoot.add(d); return d; });
+        var end = new T.Mesh(new T.TorusGeometry(0.26, 0.03, 6, 24), new T.MeshBasicMaterial({ color: c })); end.rotation.x = Math.PI / 2; end.position.set(b.x, 0.1, b.z - 0.2); flowRoot.add(end);
+        flows.push({ curve: curve, dots: dots, st: t.st, off: i * 0.37 });
+      });
+    }
+
     var data = null, selected = null;
     function update(d) {
       data = d;
       var sig = d.agents.map(function (a) { return a.c + ":" + a.area + ":" + (a.st === "idea" ? 1 : 0); }).join("|");
-      if (sig !== signature) { signature = sig; buildStations(d.agents); }
+      var rebuilt = false;
+      if (sig !== signature) { signature = sig; buildStations(d.agents); rebuilt = true; }
       else d.agents.forEach(function (a) { if (byCode[a.c]) byCode[a.c].a = a; });
       paint();
+      var tasks = d.tasks || [], fsig = tasks.map(function (t) { return t.id + t.st; }).join("|");
+      if (rebuilt || fsig !== flowSig) { flowSig = fsig; buildFlows(tasks); }
       ROOMS.forEach(function (R) { drawScreen(screens[R.id], d.screens && d.screens[R.id]); });
       var racks = d.racks || []; if (rackLeds.length !== Math.min(7, racks.length)) buildRacks(racks);
       var Q = { good: "#2fbf71", warn: "#f0a020", crit: "#e5484d" };
@@ -437,6 +464,13 @@
         } else if (s.ch) { s.ch.aL.rotation.x = s.ch.aR.rotation.x = st === "appr" ? -0.9 : -1.0; if (st === "appr") s.ch.aR.rotation.x = -2.85; }
         s.icon.position.y = (s.ghost ? 1.25 : 1.98) + (still ? 0 : bob + Math.sin(t * 2 + ph) * 0.015); s.icon.scale.set(0.34 * ic, 0.34 * ic, 1);
         place(s.tag, s.top, true); s.tag.classList.toggle("compact", cur.dist > 27 && s.a.c !== selected);
+      });
+      flows.forEach(function (f) {
+        f.dots.forEach(function (d, k) {
+          if (f.st === "blocked") { d.position.copy(f.curve.getPoint(0.5)); d.visible = k === 0; d.scale.setScalar(still ? 1 : 1 + Math.abs(Math.sin(t * 4)) * 0.6); return; }
+          var u = still ? 0.35 + k * 0.3 : ((t * (f.st === "in_progress" ? 0.32 : 0.16) + f.off + k * 0.5) % 1);
+          d.position.copy(f.curve.getPoint(u));
+        });
       });
       ROOMS.forEach(function (R) { place(R.tag, R.top, cur.dist > 17); });
       renderer.render(scene, cam);

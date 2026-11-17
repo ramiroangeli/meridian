@@ -52,6 +52,13 @@ export async function buildState() {
     q("select due, zone, title, status from fiscal_items where user_id=$1", [uid]),
   ]);
 
+  const tasks = await q(
+    `select id, from_code, to_code, title, detail, priority, status, result, created_at, updated_at from agent_tasks
+      where user_id=$1 and (status in ('open','in_progress','blocked') or updated_at > now() - interval '14 days')
+      order by case status when 'blocked' then 0 when 'in_progress' then 1 when 'open' then 2 else 3 end,
+               case priority when 'alta' then 0 when 'normal' then 1 else 2 end, updated_at desc limit 80`, [uid]);
+  const inbox: Record<string, number> = {};
+  for (const t of tasks) if (["open", "in_progress", "blocked"].includes(t.status)) inbox[t.to_code] = (inbox[t.to_code] || 0) + 1;
   const months = [...new Set(tx.map((r) => r.m as string))].slice(-6);
   const pick = (m: string, f: (r: any) => boolean) => Math.abs(tx.filter((r) => r.m === m && f(r)).reduce((t, r) => t + r.total, 0));
   const h = hist.reverse();
@@ -86,8 +93,9 @@ export async function buildState() {
       task: a.task ?? "Sin tareas", res: a.result || (a.implemented ? "Sin resultados todavía" : "Rol todavía no implementado"),
       last: a.status === "run" ? "en curso" : rel(a.finished_at ?? a.started_at ?? null, "nunca"),
       next: a.next_note ?? rel(a.next_run_at ?? null, "sin programar"),
-      obj: a.objective, data: a.data, out: a.deliverables, perm: a.permissions, kpi: a.kpi, dep: a.depends_on, esc: a.escalation, cost: a.cost_note,
+      schedule: a.schedule || "", inbox: inbox[a.code] || 0, obj: a.objective, data: a.data, out: a.deliverables, perm: a.permissions, kpi: a.kpi, dep: a.depends_on, esc: a.escalation, cost: a.cost_note,
     })),
+    tasks: tasks.map((t) => ({ id: t.id, from: t.from_code, to: t.to_code, t: t.title, d: t.detail, pr: t.priority, st: t.status, res: t.result, age: rel(t.updated_at, ""), created: rel(t.created_at, "") })),
     props: props.map((p) => ({ id: p.id, lvl: p.level, lbl: LBL[p.level], ag: p.agent_code, t: p.title, ev: p.evidence, ben: p.benefit, esf: p.effort, risk: p.risk, next: p.next_step })),
     history: events.map((e) => ({ when: when.format(new Date(e.at)) + " UTC", who: e.actor, what: e.action, res: e.result })),
     fiscal: fiscal.map((f) => ({ d: f.due, j: f.zone, t: f.title, s: f.status })),

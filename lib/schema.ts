@@ -91,6 +91,21 @@ export const SCHEMA: string[] = [
      user_id uuid not null references users(id) on delete cascade,
      currency text not null, per_base numeric not null,
      primary key (user_id, currency))`,
+  `create table if not exists agent_tasks (
+     id uuid primary key default gen_random_uuid(),
+     user_id uuid not null references users(id) on delete cascade,
+     from_code text not null,
+     to_code text not null,
+     title text not null,
+     detail text not null default '',
+     priority text not null default 'normal' check (priority in ('alta','normal','baja')),
+     status text not null default 'open' check (status in ('open','in_progress','blocked','done','cancelled')),
+     result text not null default '',
+     proposal_id uuid references proposals(id) on delete set null,
+     due_at timestamptz,
+     created_at timestamptz not null default now(),
+     updated_at timestamptz not null default now())`,
+  `create index if not exists agent_tasks_inbox on agent_tasks (user_id, to_code, status)`,
 ];
 
-export const TABLES = ["users", "accounts", "balances", "liabilities", "transactions", "net_worth_history", "agents", "agent_runs", "proposals", "events", "fiscal_items", "fx_rates"];
+export const TABLES = ["users", "accounts", "balances", "liabilities", "transactions", "net_worth_history", "agents", "agent_runs", "proposals", "events", "fiscal_items", "fx_rates", "agent_tasks"];

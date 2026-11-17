@@ -15,7 +15,7 @@ await client.connect(new StreamableHTTPClientTransport(new URL(`${BASE}/api/k/${
 const call = async (name, args = {}) => { const r = await client.callTool({ name, arguments: args }); const t = r.content[0].text; return { err: !!r.isError, text: t, data: r.isError ? null : JSON.parse(t) }; };
 
 const tools = (await client.listTools()).tools.map((t) => t.name);
-check("lista de herramientas", tools.length === 12, tools.join(", "));
+check("lista de herramientas", tools.length === 16, tools.join(", "));
 check("no expone aprobar ni pausar", !tools.some((t) => /approve|resolve|pause/.test(t)));
 
 let s0 = await state();
@@ -46,7 +46,33 @@ check("persona la resuelve desde el tablero", (await post("/api/proposals/" + pr
 check("no se resuelve dos veces", (await post("/api/proposals/" + prop.data.proposal_id, { action: "approve" })).status === 409);
 check("queda en el historial", (await state()).history.some((h) => h.what.includes(title)));
 
+// ---------- tareas entre agentes ----------
+const brief = (await call("get_agent_brief", { agent_code: "I" })).data;
+check("brief trae instrucciones, protocolo y bandeja", brief.instrucciones.length > 50 && brief.protocolo.length >= 5 && Array.isArray(brief.bandeja), `${brief.persona}, ${brief.bandeja.length} en bandeja`);
+const ttitle = "Prueba: revisar vencimiento " + Date.now();
+const t1 = await call("assign_task", { from_agent: "B", to_agent: "I", title: ttitle, detail: "La reserva quedó corta, confirmar fecha.", priority: "alta" });
+check("Bruno asigna tarea a Inés", !t1.err, t1.text.slice(0, 60));
+check("tarea duplicada rechazada", (await call("assign_task", { from_agent: "B", to_agent: "I", title: ttitle, detail: "otra vez lo mismo" })).err);
+check("no se asigna a sí mismo", (await call("assign_task", { from_agent: "B", to_agent: "B", title: "Autoasignación prueba", detail: "no debería" })).err);
+const inbox = (await call("get_agent_brief", { agent_code: "I" })).data.bandeja;
+check("aparece en la bandeja de Inés", inbox.some((t) => t.id === t1.data.task_id));
+check("otro agente no puede cerrarla", (await call("update_task", { task_id: t1.data.task_id, agent_code: "H", status: "done", result: "no me corresponde" })).err);
+check("done sin resultado es rechazado", (await call("update_task", { task_id: t1.data.task_id, agent_code: "I", status: "done", result: "" })).err);
+await call("update_task", { task_id: t1.data.task_id, agent_code: "I", status: "in_progress" });
+let st = await state();
+check("tablero muestra la tarea en curso con su arco", st.tasks.some((t) => t.id === t1.data.task_id && t.st === "in_progress") && st.agents.find((a) => a.c === "I").inbox >= 1);
+await call("update_task", { task_id: t1.data.task_id, agent_code: "I", status: "done", result: "Vence el 28/11; alcanza con transferir AUD 250" });
+check("Inés la completa y queda en el historial", (await state()).history.some((h) => h.what.includes("Completó: " + ttitle)));
+check("no se reabre una tarea cerrada", (await call("update_task", { task_id: t1.data.task_id, agent_code: "I", status: "in_progress" })).err);
+const ut = "Prueba usuario " + Date.now();
+check("el usuario asigna desde el tablero", (await post("/api/tasks", { to: "H", title: ut, detail: "monto de referencia", priority: "normal" })).ok);
+check("título vacío rechazado", (await post("/api/tasks", { to: "H", title: "", detail: "" })).status === 400);
+const mine = (await state()).tasks.find((t) => t.t === ut);
+check("la tarea del usuario llega a Hana", mine && mine.from === "user" && mine.to === "H");
+check("el usuario la cancela", (await post("/api/tasks/" + mine.id, {})).ok && (await state()).tasks.find((t) => t.id === mine.id).st === "cancelled");
+
 await post("/api/pause", { paused: true });
+check("en pausa, no se asignan tareas", (await call("assign_task", { from_agent: "B", to_agent: "I", title: "En pausa prueba", detail: "no debería" })).err);
 const blocked = await call("start_agent_run", { agent_code: "C", task: "No debería iniciar" });
 check("en pausa, el agente no puede iniciar", blocked.err, blocked.text.slice(0, 40));
 check("en pausa, no se crean propuestas", (await call("create_proposal", { agent_code: "C", level: "idea", title: title + " b", evidence: "prueba en pausa", benefit: "x", effort: "x", risk: "x", next_step: "x" })).err);

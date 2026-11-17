@@ -61,3 +61,14 @@ scripts/e2e.mjs    prueba de punta a punta
 - El token en la URL sirve para un solo usuario. Antes de sumar terceros hay que pasar a OAuth.
 - Los límites de la política de inversión, el calendario fiscal y los costos son valores de ejemplo.
 - No hay importador de CSV en el tablero: los movimientos entran por el conector.
+
+## Cómo se coordinan los agentes
+
+Los chats de Claude no se hablan entre sí. Se coordinan a través de Meridiano, como un equipo que trabaja con tickets:
+
+1. Un chat o una tarea programada "se pone el uniforme" de un agente con `get_agent_brief`: recibe sus instrucciones, el protocolo de trabajo y su bandeja.
+2. Trabaja, y si necesita a otra área deja una tarea con `assign_task`. Si algo requiere dinero o una decisión, deja una propuesta para el usuario.
+3. El agente destinatario encuentra la tarea en su bandeja la próxima vez que corre y la mueve con `update_task` (en curso, hecha o bloqueada).
+4. El usuario ve todo en Tareas y en la Oficina 3D, puede asignar o cancelar tareas, y es el único que aprueba propuestas.
+
+Límites contra bucles: 40 tareas entre agentes por día, 12 abiertas por agente, sin duplicados ni autoasignación, y nada se mueve con el sistema en pausa.
