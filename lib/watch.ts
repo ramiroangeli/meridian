@@ -2,6 +2,7 @@ import { q, currentUser, logEvent } from "./db";
 import { latestBalances } from "./state";
 import { evaluate, type Alert } from "./rules";
 import { stepMandates } from "./trading";
+import { reconcileLive } from "./live";
 import { krakenConfigured, fetchKraken, fxPerAud, priceAud, assetClass, clearTickerCache, FIAT, type OpenOrder } from "./kraken";
 
 export const KRAKEN_CONN = "API Kraken (servidor)";
@@ -51,6 +52,7 @@ export async function runWatch(trigger: "cron" | "manual" | "agente"): Promise<W
   // El mandato de trading usa precios públicos de Kraken, así que corre también con datos de ejemplo.
   let tradeNote: string | null = null;
   try { tradeNote = await stepMandates(u.id); } catch (e: any) { tradeNote = "Trading con error: " + (e?.message || "desconocido"); }
+  try { const ln = await reconcileLive(u.id); if (ln) tradeNote = tradeNote ? tradeNote + ". " + ln : ln; } catch (e: any) { tradeNote = (tradeNote ? tradeNote + ". " : "") + "Mandato real con error: " + (e?.message || "desconocido"); }
   if (u.demo) return { ok: true, summary: "Datos de ejemplo: la vigilancia se activa cuando empieces con tus datos." + (tradeNote ? " " + tradeNote + "." : ""), alerts: [], tasks: 0 };
   const uid = u.id, notes: string[] = [];
   if (tradeNote) notes.push(tradeNote);

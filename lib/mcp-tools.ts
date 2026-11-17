@@ -1,3 +1,4 @@
+import { marketSnapshot, placeTrade, closePosition, moveStop, reconcileLive, checkKeys } from "./live";
 import { z } from "zod";
 import { q, currentUser, logEvent } from "./db";
 import { latestBalances, agentRows, rel } from "./state";
@@ -14,6 +15,7 @@ const fail = (msg: string) => ({ content: [{ type: "text" as const, text: msg }]
 const PAUSED = "El sistema está en pausa. No se registran ejecuciones ni propuestas hasta que el usuario lo reanude desde el tablero.";
 const RULES = [
   "Solo lectura sobre cuentas reales: no ejecutes compras, ventas, transferencias ni retiros.",
+  "Única excepción: Teo (agente M) opera el mandato de trading real con place_trade, close_position y update_stop, dentro de los límites que el código controla. Ningún otro agente usa esas herramientas.",
   "Toda acción con dinero se presenta como propuesta con create_proposal y espera la decisión del usuario en el tablero.",
   "Para trabajar como un agente, empezá con get_agent_brief: trae sus instrucciones, el protocolo y su bandeja de tareas.",
   "Antes de trabajar como agente, llamá a start_agent_run; al terminar, a finish_agent_run.",
@@ -345,7 +347,68 @@ export function registerTradingTools(server: any) {
   }, async () => {
     const u = await currentUser();
     const t = await tradingState(u.id);
-    return ok({ ...t, equity: t.equity.slice(-30), nota: "Modo simulado: el motor usa precios reales de Kraken pero no envía órdenes. Capital, piso y objetivo solo los cambia el usuario." });
+    const real = t.mandate?.mode === "live";
+    return ok({ ...t, equity: t.equity.slice(-30), nota: real
+      ? "Dinero real. Límites que el código aplica: solo BTC, ETH, SOL y XRP contra AUD; una posición por moneda; cada compra lleva stop-loss cargado en Kraken; el patrimonio con todos los stops ejecutados nunca puede quedar debajo del piso; al objetivo se vende todo y pasa a USDC. Capital, piso y objetivo solo los cambia el usuario."
+      : "Modo simulado: el motor usa precios reales de Kraken pero no envía órdenes. Capital, piso y objetivo solo los cambia el usuario." });
+  });
+
+  server.registerTool("market_snapshot", {
+    title: "Mercado de las monedas permitidas",
+    description: "Para BTC, ETH, SOL y XRP contra AUD: precio actual, cambio a 1, 7 y 30 días, medias de 20, 50 y 200 días, ATR de 14 días (volatilidad diaria en AUD y en %), máximo y mínimo de 30 días. Datos públicos de Kraken.",
+    inputSchema: z.object({}),
+  }, async () => {
+    try { return ok({ monedas: await marketSnapshot(), nota: "Velas diarias cerradas; precio_actual es el último operado." }); } catch (e: any) { return fail(e?.message || "Sin datos de mercado."); }
+  });
+
+  server.registerTool("place_trade", {
+    title: "Abrir una operación (dinero real)",
+    description: "Solo Teo (M). Compra a mercado una moneda permitida con parte del efectivo del mandato real y carga un stop-loss en Kraken. Rechaza la orden si: la moneda no está permitida, ya hay posición en esa moneda, el monto supera el efectivo, el stop no queda entre 0,5% y 50% debajo del precio, o si con todos los stops ejecutados el mandato quedaría debajo del piso. Antes de la fecha de inicio solo ensaya (Kraken valida sin ejecutar). La primera orden real espera la aprobación del usuario.",
+    inputSchema: z.object({
+      asset: z.enum(["BTC", "ETH", "SOL", "XRP"]),
+      amount_aud: z.number().positive().describe("AUD a invertir de la caja del mandato"),
+      stop_loss: z.number().positive().describe("Precio en AUD del stop-loss (venta a mercado si se toca)"),
+      take_profit: z.number().positive().optional().describe("Precio en AUD en que Teo vende la posición. Lo controla Meridiano, no Kraken."),
+      rationale: z.string().min(20).max(600).describe("El plan: por qué esta moneda, por qué este stop y este objetivo, y qué invalida la idea"),
+    }),
+  }, async (a: any) => {
+    const u = await currentUser();
+    try { return ok(await placeTrade(u.id, a)); } catch (e: any) { return fail(e?.message || "No se pudo abrir la operación."); }
+  });
+
+  server.registerTool("close_position", {
+    title: "Cerrar una posición (dinero real)",
+    description: "Solo Teo (M). Cancela el stop y vende a mercado toda la posición del mandato en esa moneda. Nunca vende unidades que no sean del mandato.",
+    inputSchema: z.object({ asset: z.enum(["BTC", "ETH", "SOL", "XRP"]), reason: z.string().min(5).max(300) }),
+  }, async (a: any) => {
+    const u = await currentUser();
+    try { return ok(await closePosition(u.id, a.asset, a.reason)); } catch (e: any) { return fail(e?.message || "No se pudo cerrar."); }
+  });
+
+  server.registerTool("update_stop", {
+    title: "Mover un stop-loss (dinero real)",
+    description: "Solo Teo (M). Carga un stop nuevo en Kraken y cancela el anterior. Subirlo siempre se permite; bajarlo solo si el peor caso del mandato sigue sobre el piso.",
+    inputSchema: z.object({ asset: z.enum(["BTC", "ETH", "SOL", "XRP"]), stop_loss: z.number().positive() }),
+  }, async (a: any) => {
+    const u = await currentUser();
+    try { return ok(await moveStop(u.id, a.asset, a.stop_loss)); } catch (e: any) { return fail(e?.message || "No se pudo mover el stop."); }
+  });
+
+  server.registerTool("refresh_trading", {
+    title: "Conciliar el mandato real con Kraken",
+    description: "Revisa stops ejecutados, take profits alcanzados, objetivo y piso, y registra el patrimonio. Teo lo llama al empezar cada turno.",
+    inputSchema: z.object({}),
+  }, async () => {
+    const u = await currentUser();
+    try { return ok({ resultado: (await reconcileLive(u.id)) ?? "No hay mandato real en curso." }); } catch (e: any) { return fail(e?.message || "No se pudo conciliar."); }
+  });
+
+  server.registerTool("check_trading_keys", {
+    title: "Probar las claves de Kraken",
+    description: "Prueba la clave de lectura (saldos) y la de operación (saldos y una orden mínima que Kraken valida sin ejecutar). No mueve dinero.",
+    inputSchema: z.object({}),
+  }, async () => {
+    try { return ok(await checkKeys()); } catch (e: any) { return fail(e?.message || "No se pudo probar."); }
   });
   server.registerTool("simulate_trading_plan", {
     title: "Simular un plan de trading",

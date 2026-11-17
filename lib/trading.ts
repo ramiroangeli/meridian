@@ -45,6 +45,12 @@ export async function createMandate(uid: string, m: Mandate) {
 export async function setMandate(uid: string, action: "pause" | "resume" | "end") {
   const m = await currentMandate(uid);
   if (!m || !["active", "paused"].includes(m.status)) throw new Error("No hay un mandato en curso.");
+  if (m.mode === "live") {
+    if (action === "end") { const { endLive } = await import("./live"); return endLive(uid); }
+    await q("update trading_mandates set status=$2 where id=$1", [m.id, action === "pause" ? "paused" : "active"]);
+    await logEvent(uid, "Vos", action === "pause" ? "Pausaste el mandato real" : "Reanudaste el mandato real", action === "pause" ? "Teo no abre operaciones; los stops siguen cargados en Kraken" : "");
+    return;
+  }
   if (action === "pause") {
     await q("update trading_mandates set status='paused' where id=$1", [m.id]);
     await logEvent(uid, "Vos", "Pausaste el mandato de trading");
@@ -65,7 +71,7 @@ const aud = (n: number) => "AUD " + Math.round(n).toLocaleString("es-AR");
 // Procesa las velas diarias nuevas. Lo corre la vigilancia diaria, el botón de sincronizar y refresh_data.
 export async function stepMandates(uid: string): Promise<string | null> {
   const m = await currentMandate(uid);
-  if (!m || m.status !== "active") return null;
+  if (!m || m.status !== "active" || m.mode === "live") return null;
   const h = await ohlcDaily(m.pair);
   const mand: Mandate = { capital: num(m.capital), floor: num(m.floor), target: num(m.target) };
   const p = m.params as Params, book = m.book as Book;
@@ -123,10 +129,16 @@ export async function tradingState(uid: string) {
   const fills = await q("select t, kind, price::float8 as price, units::float8 as units, aud::float8 as aud, fee::float8 as fee, equity::float8 as equity, note from trading_fills where mandate_id=$1 order by t desc, created_at desc limit 60", [m.id]);
   const eq = await q("select t, equity::float8 as equity, price::float8 as price from trading_equity where mandate_id=$1 order by t", [m.id]);
   const b = m.book as Book, last = eq[eq.length - 1];
+  let live: any = null;
+  if (m.mode === "live") {
+    const { liveState } = await import("./live");
+    try { live = await liveState(uid, m); } catch (e: any) { live = { error: e?.message || "Sin datos de Kraken" }; }
+  }
   return {
+    live,
     mandate: { id: m.id, mode: m.mode, pair: m.pair, capital: num(m.capital), floor: num(m.floor), target: num(m.target), status: m.status,
       cash: b.cash, units: b.units, stop: b.stop, entry: b.entry, pending: b.pending, endValue: b.endValue,
-      equity: last ? last.equity : num(m.capital), price: last ? last.price : null, lastT: num(m.last_t), created: m.created_at },
+      equity: live?.equity ?? (last ? last.equity : num(m.capital)), price: last ? last.price : null, lastT: num(m.last_t), created: m.created_at },
     fills, equity: eq.map((e) => [Number(e.t), e.equity]), odds: o[0] ? { ...o[0].detail, at: o[0].synced_at } : null,
   };
 }

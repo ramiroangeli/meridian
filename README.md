@@ -91,3 +91,13 @@ Pruebas: `npm run test:unit` (firma de Kraken contra el ejemplo oficial y reglas
 - `odds()`: Monte Carlo por bloques con el historial diario real de Kraken, con y sin la tendencia del período, contra comprar y mantener.
 - `lib/trading.ts`: el paso diario lo corre la vigilancia. No hay código que envíe órdenes reales.
 - Agente M, Teo Varela (Head of Trading), con las herramientas `get_trading_status` y `simulate_trading_plan`.
+
+## Mandato con dinero real (Teo)
+
+- Dos claves de Kraken: `KRAKEN_API_KEY/SECRET` (solo consulta) y `KRAKEN_TRADE_KEY/SECRET` (crear, modificar y cancelar órdenes; **nunca** retiro ni depósito).
+- Se crea desde Trading → "Mandato con dinero real", escribiendo `DINERO REAL`. Antes de la fecha de inicio, toda orden se envía con `validate=true` (Kraken la valida sin ejecutarla).
+- La primera orden real queda como propuesta en Decisiones; aprobarla la ejecuta, controlando de nuevo los límites al precio del momento.
+- Límites en `lib/risk.ts` (los aplica el código, no el agente): BTC, ETH, SOL y XRP contra AUD al contado; una posición por moneda; stop-loss obligatorio cargado en Kraken; patrimonio con todos los stops ejecutados ≥ piso; mover un stop hacia abajo solo si el peor caso sigue sobre el piso; al objetivo vende todo y compra USDC; al piso vende todo y se detiene; la pausa global bloquea compras.
+- Solo vende unidades registradas en el mandato: no toca el resto de tus monedas.
+- Herramientas MCP de Teo: `market_snapshot`, `place_trade`, `close_position`, `update_stop`, `refresh_trading`, `check_trading_keys`.
+- Pruebas: `npm run test:unit` (incluye `scripts/risk-test.mjs`) y `npm test` con el Kraken simulado (órdenes, stops, take profit, objetivo y USDC).

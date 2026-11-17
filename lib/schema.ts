@@ -142,6 +142,28 @@ export const SCHEMA: string[] = [
      mandate_id uuid not null references trading_mandates(id) on delete cascade,
      t bigint not null, equity numeric not null, price numeric not null,
      primary key (mandate_id, t))`,
+  `alter table trading_mandates add column if not exists live_from timestamptz`,
+  `alter table trading_mandates add column if not exists approve_first boolean not null default false`,
+  `create table if not exists trading_positions (
+     id uuid primary key default gen_random_uuid(),
+     user_id uuid not null references users(id) on delete cascade,
+     mandate_id uuid not null references trading_mandates(id) on delete cascade,
+     asset text not null, pair text not null,
+     units numeric not null, entry numeric not null, cost_aud numeric not null,
+     sl numeric not null, tp numeric, sl_txid text,
+     status text not null default 'open' check (status in ('open','closed')),
+     rationale text not null default '', close_reason text, exit_price numeric, proceeds_aud numeric,
+     opened_at timestamptz not null default now(), closed_at timestamptz)`,
+  `create table if not exists trading_intents (
+     id uuid primary key default gen_random_uuid(),
+     user_id uuid not null references users(id) on delete cascade,
+     mandate_id uuid not null references trading_mandates(id) on delete cascade,
+     asset text not null, amount_aud numeric not null, sl numeric not null, tp numeric,
+     rationale text not null default '',
+     status text not null check (status in ('pending','executed','rejected','failed','dryrun')),
+     proposal_id uuid references proposals(id) on delete set null,
+     result text not null default '',
+     created_at timestamptz not null default now())`,
 ];
 
-export const TABLES = ["users", "accounts", "balances", "liabilities", "transactions", "net_worth_history", "agents", "agent_runs", "proposals", "events", "fiscal_items", "fx_rates", "agent_tasks", "source_status", "price_history", "trading_mandates", "trading_fills", "trading_equity"];
+export const TABLES = ["users", "accounts", "balances", "liabilities", "transactions", "net_worth_history", "agents", "agent_runs", "proposals", "events", "fiscal_items", "fx_rates", "agent_tasks", "source_status", "price_history", "trading_mandates", "trading_fills", "trading_equity", "trading_positions", "trading_intents"];

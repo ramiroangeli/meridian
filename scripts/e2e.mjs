@@ -17,7 +17,7 @@ await client.connect(new StreamableHTTPClientTransport(new URL(`${BASE}/api/k/${
 const call = async (name, args = {}) => { const r = await client.callTool({ name, arguments: args }); const t = r.content[0].text; return { err: !!r.isError, text: t, data: r.isError ? null : JSON.parse(t) }; };
 
 const tools = (await client.listTools()).tools.map((t) => t.name);
-check("lista de herramientas", tools.length === 19, tools.join(", "));
+check("lista de herramientas", tools.length === 25, tools.join(", "));
 check("no expone aprobar ni pausar", !tools.some((t) => /approve|resolve|pause/.test(t)));
 
 let s0 = await state();
@@ -85,8 +85,10 @@ check("reanudado", (await state()).paused === false);
 if (process.env.E2E_RESET === "1") {
   const SECRET = process.env.KRAKEN_API_SECRET, D = 86400;
   const sign = (path, nonce, body) => createHmac("sha512", Buffer.from(SECRET, "base64")).update(Buffer.concat([Buffer.from(path), createHash("sha256").update(nonce + body).digest()])).digest("base64");
-  const PRICES = { XBTAUD: 140000, HYPEUSD: 40, AUDUSD: 0.65, EURUSD: 1.08, USDCUSD: 1, BABYUSD: 0.02 };
-  let privateCalls = 0, badSig = 0, extra = 0;
+  const PRICES = { ETHAUD: 5000, SOLAUD: 300, XRPAUD: 3.5, USDCAUD: 1.54, XBTAUD: 140000, HYPEUSD: 40, AUDUSD: 0.65, EURUSD: 1.08, USDCUSD: 1, BABYUSD: 0.02 };
+  let privateCalls = 0, badSig = 0, extra = 0, validated = 0, seq = 0;
+  const ORDERS = {}; // órdenes reales simuladas: mercado se completa al instante; stop-loss se ejecuta si el precio lo toca
+  const META = { XBTAUD: ["0.00005", 1], ETHAUD: ["0.002", 2], SOLAUD: ["0.02", 2], XRPAUD: ["2", 5], USDCAUD: ["5", 4] };
   // Historial diario simulado: 300 días ondulantes, más "extra" días de suba fuerte que el test va agregando.
   const T0 = Date.UTC(2025, 0, 1);
   const candles = () => {
@@ -101,12 +103,29 @@ if (process.env.E2E_RESET === "1") {
     let body = ""; req.on("data", (c) => (body += c)); req.on("end", () => {
       const u = new URL(req.url, "http://x"), send = (o) => { res.setHeader("content-type", "application/json"); res.end(JSON.stringify(o)); };
       if (u.pathname === "/0/public/OHLC") return send({ error: [], result: { XXBTZAUD: candles(), last: 0 } });
+      if (u.pathname === "/0/public/AssetPairs") { const pr = u.searchParams.get("pair"), mt = META[pr]; return send(mt ? { error: [], result: { [pr]: { ordermin: mt[0], costmin: "0.5", lot_decimals: 8, pair_decimals: mt[1] } } } : { error: ["EQuery:Unknown asset pair"] }); }
       if (u.pathname === "/0/public/Ticker") { const p = PRICES[u.searchParams.get("pair")]; return send(p ? { error: [], result: { X: { c: [String(p), "1"] } } } : { error: ["EQuery:Unknown asset pair"] }); }
       privateCalls++;
       const nonce = new URLSearchParams(body).get("nonce");
-      if (req.headers["api-key"] !== "testkey" || req.headers["api-sign"] !== sign(u.pathname, nonce, body)) { badSig++; return send({ error: ["EAPI:Invalid signature"] }); }
+      if (!["testkey", "tradekey"].includes(req.headers["api-key"]) || req.headers["api-sign"] !== sign(u.pathname, nonce, body)) { badSig++; return send({ error: ["EAPI:Invalid signature"] }); }
       if (u.pathname === "/0/private/Balance") return send({ error: [], result: { ZAUD: "2000.2063", XXBT: "0.05715759", "XBT.F": "0.001", HYPE: "24.7474144", USDC: "0.20040232", BABY: "0.59172" } });
       if (u.pathname === "/0/private/OpenOrders") return send({ error: [], result: { open: { "OABC-1": { opentm: Date.now() / 1000 - 9 * D, vol: "0.04", descr: { pair: "XBTAUD", type: "buy", ordertype: "limit", price: "90000" } } } } });
+      const P = Object.fromEntries(new URLSearchParams(body));
+      const trade = ["/0/private/AddOrder", "/0/private/CancelOrder", "/0/private/QueryOrders"].includes(u.pathname);
+      if (trade && req.headers["api-key"] !== "tradekey") return send({ error: ["EGeneral:Permission denied"] });
+      if (u.pathname === "/0/private/AddOrder") {
+        if (!PRICES[P.pair]) return send({ error: ["EQuery:Unknown asset pair"] });
+        if (P.validate === "true") { validated++; return send({ error: [], result: { descr: { order: `${P.type} ${P.volume} ${P.pair} @ ${P.ordertype}` } } }); }
+        const id = "O" + ++seq, px = PRICES[P.pair], v = Number(P.volume);
+        ORDERS[id] = P.ordertype === "market" ? { ...P, status: "closed", vol_exec: v, cost: v * px, fee: v * px * 0.004, price: px } : { ...P, stop: P.price, status: "open", vol_exec: 0, cost: 0, fee: 0, price: 0 };
+        return send({ error: [], result: { txid: [id], descr: { order: "ok" } } });
+      }
+      if (u.pathname === "/0/private/CancelOrder") { const o = ORDERS[P.txid]; if (!o) return send({ error: ["EOrder:Unknown order"] }); if (o.status === "open") o.status = "canceled"; return send({ error: [], result: { count: 1 } }); }
+      if (u.pathname === "/0/private/QueryOrders") {
+        const o = ORDERS[P.txid]; if (!o) return send({ error: [], result: {} });
+        if (o.status === "open" && o.ordertype === "stop-loss" && PRICES[o.pair] <= Number(o.stop)) { const v = Number(o.volume), px = Number(o.stop); Object.assign(o, { status: "closed", vol_exec: v, cost: v * px, fee: v * px * 0.004, price: px }); }
+        return send({ error: [], result: { [P.txid]: { status: o.status, vol_exec: String(o.vol_exec), cost: String(o.cost), fee: String(o.fee), price: String(o.price) } } });
+      }
       send({ error: ["EGeneral:Unknown method"] });
     });
   }).listen(Number(process.env.MOCK_KRAKEN_PORT || 3199));
@@ -161,10 +180,63 @@ if (process.env.E2E_RESET === "1") {
   await tr({ action: "resume" });
   check("al reanudar no simula los días en pausa", (await state()).trading.mandate.lastT === lastDay + 8 * 86400000);
   extra = 60; await post("/api/sync", {}); r = await state();
-  check("con la suba sostenida llega al objetivo y pasa a USDC", r.trading.mandate.status === "target" && r.trading.fills[0].kind === "target" && r.trading.mandate.endValue >= 4900, `AUD ${Math.round(r.trading.mandate.endValue)}`);
+  check("con la suba sostenida llega al objetivo y pasa a USDC", r.trading.mandate.status === "target" && r.trading.fills.some((f) => f.kind === "target") && r.trading.mandate.endValue >= 4900, `AUD ${Math.round(r.trading.mandate.endValue)}`);
   check("deja una propuesta para revisar el resultado", r.props.some((p) => p.t === "El mandato simulado llegó al objetivo"));
   check("después del objetivo se puede crear otro", (await tr({ action: "create", capital: 2000, floor: 1200, target: 5000 })).ok);
   check("terminar a mano", (await tr({ action: "end" })).ok && (await state()).trading.mandate.status === "ended");
+
+  // ---------- mandato con dinero real (contra el Kraken simulado) ----------
+  const keys = await (await tr({ action: "check_keys" })).json();
+  check("prueba de claves sin mover dinero", /^ok/.test(keys.read) && /^ok/.test(keys.trade) && validated === 1 && Object.keys(ORDERS).length === 0, JSON.stringify(keys));
+  const plan = { capital: 2000, floor: 1200, target: 5000 };
+  check("mandato real exige escribir DINERO REAL", (await tr({ action: "create_live", ...plan, confirm: "si", liveFrom: new Date(Date.now() + 3600e3).toISOString() })).status === 400);
+  check("mandato real con más capital que el saldo se rechaza", (await tr({ action: "create_live", capital: 3000, floor: 1200, target: 5000, confirm: "DINERO REAL", liveFrom: new Date(Date.now() + 3600e3).toISOString() })).status === 400);
+  check("crea el mandato real en ensayo", (await tr({ action: "create_live", ...plan, confirm: "DINERO REAL", liveFrom: new Date(Date.now() + 3600e3).toISOString() })).ok);
+  r = await state();
+  check("tablero muestra ensayo", r.trading.mandate.mode === "live" && r.trading.live.rehearsal && r.trading.live.cash === 2000);
+  const snap = await call("market_snapshot");
+  check("Teo ve las 4 monedas", !snap.err && snap.data.monedas.length === 4 && snap.data.monedas.every((m) => m.media_50d > 0 && m.atr_pct > 0), snap.text.slice(0, 80));
+  const btcTrade = { asset: "BTC", amount_aud: 800, stop_loss: 126000, take_profit: 170000, rationale: "Tendencia diaria sobre la media de 50; stop a 2 ATR, objetivo 2R." };
+  const reh = await call("place_trade", btcTrade);
+  check("en ensayo Kraken solo valida", !reh.err && reh.data.estado === "ensayo" && validated === 2 && Object.keys(ORDERS).length === 0, reh.text.slice(0, 80));
+  const deepT = await call("place_trade", { asset: "BTC", amount_aud: 2000, stop_loss: 71000, rationale: "Prueba de un stop que perfora el piso del mandato." });
+  check("rechaza una orden que con los stops perfora el piso", deepT.err && /piso/.test(deepT.text), deepT.text.slice(0, 90));
+  check("moneda no permitida rechazada por el esquema", (await call("place_trade", { ...btcTrade, asset: "HYPE" })).err);
+  check("terminar el ensayo", (await tr({ action: "end" })).ok);
+  check("crea el mandato real activo", (await tr({ action: "create_live", ...plan, confirm: "DINERO REAL", liveFrom: new Date(Date.now() - 60e3).toISOString() })).ok);
+  const first = await call("place_trade", btcTrade);
+  check("la primera orden real espera aprobación", !first.err && first.data.estado === "esperando_aprobacion" && Object.keys(ORDERS).length === 0, first.text.slice(0, 80));
+  check("no se apilan órdenes pendientes", (await call("place_trade", { ...btcTrade, asset: "ETH", stop_loss: 4500, take_profit: 6000 })).err);
+  r = await state();
+  const fp = r.props.find((p) => p.t === "Primera orden real: comprar BTC");
+  check("la propuesta aparece en Decisiones", !!fp);
+  const ap = await (await post("/api/proposals/" + fp.id, { action: "approve" })).json();
+  check("aprobar ejecuta la compra y carga el stop en Kraken", ap.trade && ap.trade.ok && Object.values(ORDERS).some((o) => o.ordertype === "stop-loss" && o.status === "open" && o.stop === "126000"), JSON.stringify(ap).slice(0, 120));
+  r = await state();
+  const L = r.trading.live;
+  check("posición y caja del mandato", L.positions.length === 1 && L.positions[0].asset === "BTC" && Math.abs(L.cash - (2000 - 800 * 0 - L.positions[0].cost)) < 1e-6 && L.cash < 1210 && !L.approveFirst, `caja ${L.cash.toFixed(2)}`);
+  const eth = await call("place_trade", { asset: "ETH", amount_aud: 600, stop_loss: 4600, take_profit: 5600, rationale: "ETH acompaña la tendencia; stop corto, objetivo 2,5R." });
+  check("después de la primera, opera solo", !eth.err && eth.data.estado === "ejecutada", eth.text.slice(0, 90));
+  check("subir el stop", !(await call("update_stop", { asset: "BTC", stop_loss: 133000 })).err && Object.values(ORDERS).filter((o) => o.ordertype === "stop-loss" && o.pair === "XBTAUD" && o.status === "open").length === 1);
+  check("stop sobre el precio se rechaza", (await call("update_stop", { asset: "BTC", stop_loss: 150000 })).err);
+  if (process.env.E2E_HOLD) { // permite capturar el tablero con posiciones abiertas
+    const fs = await import("node:fs"); fs.writeFileSync(process.env.E2E_HOLD, "1");
+    while (fs.existsSync(process.env.E2E_HOLD)) await new Promise((ok) => setTimeout(ok, 300));
+  }
+  PRICES.XBTAUD = 132000; PRICES.ETHAUD = 5700;
+  const rec = await call("refresh_trading");
+  r = await state();
+  check("concilia stop ejecutado y take profit", !rec.err && r.trading.live.positions.length === 0 && r.trading.fills.some((f) => f.kind === "stop") && r.trading.fills.some((f) => f.kind === "sell" && /Take profit/.test(f.note)), rec.text.slice(0, 120));
+  await post("/api/pause", { paused: true });
+  check("en pausa global no abre operaciones", (await call("place_trade", { asset: "SOL", amount_aud: 500, stop_loss: 270, rationale: "Prueba durante la pausa global del sistema." })).err);
+  await post("/api/pause", { paused: false });
+  const cashNow = (await state()).trading.live.cash;
+  check("abre SOL", !(await call("place_trade", { asset: "SOL", amount_aud: Math.floor(cashNow - 50), stop_loss: 285, rationale: "SOL rompe máximos de 20 días; stop debajo del último mínimo." })).err);
+  PRICES.SOLAUD = 1500;
+  await call("refresh_trading"); r = await state();
+  check("al objetivo vende todo y pasa a USDC", r.trading.mandate.status === "target" && Object.values(ORDERS).some((o) => o.pair === "USDCAUD" && o.status === "closed") && r.props.some((p) => p.t === "El mandato real llegó al objetivo"), r.trading.mandate.status);
+  check("no queda ningún stop abierto", Object.values(ORDERS).every((o) => o.status !== "open"));
+  PRICES.XBTAUD = 140000; PRICES.ETHAUD = 5000; PRICES.SOLAUD = 300;
   mock.close();
 }
 

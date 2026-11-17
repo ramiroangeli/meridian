@@ -1,5 +1,6 @@
 import { createMandate, setMandate, computeOdds, currentMandate } from "@/lib/trading";
 import { currentUser } from "@/lib/db";
+import { createLive, checkKeys } from "@/lib/live";
 import { webAuthed, denied } from "@/lib/auth";
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -17,6 +18,11 @@ export async function POST(req: Request) {
       return Response.json(await computeOdds(u.id, use));
     }
     if (b.action === "create") { await createMandate(u.id, plan); return Response.json({ ok: true }); }
+    if (b.action === "create_live") {
+      if (b.confirm !== "DINERO REAL") return Response.json({ error: "Escribí DINERO REAL para confirmar." }, { status: 400 });
+      await createLive(u.id, plan, new Date(b.liveFrom)); return Response.json({ ok: true });
+    }
+    if (b.action === "check_keys") return Response.json(await checkKeys());
     if (["pause", "resume", "end"].includes(b.action)) { await setMandate(u.id, b.action); return Response.json({ ok: true }); }
     return Response.json({ error: "Acción no válida" }, { status: 400 });
   } catch (e: any) {

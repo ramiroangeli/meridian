@@ -1,0 +1,31 @@
+// Límites duros del mandato real. Uso: node --experimental-strip-types scripts/risk-test.mjs
+import { checkBuy, checkStopMove, worstCase, mandateEnd } from "../lib/risk.ts";
+let fails = 0;
+const check = (n, c, x = "") => { console.log((c ? "ok   " : "FALLA") + " " + n + (x ? "  " + x : "")); if (!c) fails++; };
+const meta = { ordermin: 0.00005, costmin: 0.5, lotDecimals: 8, pairDecimals: 1 };
+const base = { floor: 1200, cash: 2000, positions: [], asset: "BTC", amountAud: 800, price: 140000, sl: 126000, tp: 168000, meta };
+
+const ok = checkBuy(base);
+check("compra razonable pasa", ok.ok && ok.volume > 0.0056 && ok.volume < 0.00572, JSON.stringify(ok));
+check("peor caso calculado con costos", ok.ok && ok.worst > 1200 && ok.worst < 1920);
+check("moneda no permitida", !checkBuy({ ...base, asset: "HYPE" }).ok);
+check("monto mayor a la caja", !checkBuy({ ...base, amountAud: 2100 }).ok);
+check("stop arriba del precio", !checkBuy({ ...base, sl: 141000 }).ok);
+check("stop pegado al precio (<0,5%)", !checkBuy({ ...base, sl: 139800 }).ok);
+check("stop a más de 50%", !checkBuy({ ...base, sl: 60000 }).ok);
+check("take profit debajo del precio", !checkBuy({ ...base, tp: 139000 }).ok);
+const deep = checkBuy({ ...base, amountAud: 2000, sl: 70100 });
+check("todo el capital con stop a -50% perfora el piso", !deep.ok && /piso/.test(deep.error), deep.ok ? "" : deep.error);
+check("todo el capital con stop a -20% respeta el piso", checkBuy({ ...base, amountAud: 2000, sl: 112000 }).ok);
+const held = [{ asset: "ETH", units: 0.3, sl: 4000 }];
+check("posición repetida en la misma moneda", !checkBuy({ ...base, asset: "ETH", positions: held }).ok);
+check("el peor caso suma todas las posiciones", !checkBuy({ ...base, cash: 1000, positions: [{ asset: "ETH", units: 0.25, sl: 2400 }], amountAud: 1000, sl: 80000 }).ok && checkBuy({ ...base, cash: 1000, positions: [{ asset: "ETH", units: 0.25, sl: 2400 }], amountAud: 1000, sl: 100000 }).ok);
+check("debajo del mínimo de Kraken", !checkBuy({ ...base, amountAud: 5 }).ok);
+check("redondea el stop a los decimales del par", checkBuy({ ...base, sl: 126000.1234 }).sl === 126000.1);
+check("peor caso sin posiciones es la caja", worstCase(1500, []) === 1500);
+const pos = [{ asset: "BTC", units: 0.01, sl: 126000 }];
+check("subir el stop siempre se permite", checkStopMove(1200, 600, pos, "BTC", 130000, 140000).ok);
+check("bajar el stop debajo del piso se rechaza", !checkStopMove(1200, 0, pos, "BTC", 100000, 140000).ok);
+check("stop sobre el precio se rechaza", !checkStopMove(1200, 600, pos, "BTC", 141000, 140000).ok);
+check("fin: objetivo", mandateEnd(5000, 1200, 5000) === "target" && mandateEnd(1199, 1200, 5000) === "floor" && mandateEnd(2000, 1200, 5000) === null);
+if (fails) { console.log(fails + " fallas"); process.exit(1); } else console.log("todas pasan");

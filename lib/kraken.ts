@@ -3,6 +3,7 @@ import { createHash, createHmac } from "node:crypto";
 // Cliente mínimo de Kraken: solo lectura. No hay ninguna función para operar ni retirar.
 const base = () => process.env.KRAKEN_API_BASE || "https://api.kraken.com";
 export const krakenConfigured = () => !!(process.env.KRAKEN_API_KEY && process.env.KRAKEN_API_SECRET);
+export const tradeConfigured = () => !!(process.env.KRAKEN_TRADE_KEY && process.env.KRAKEN_TRADE_SECRET);
 
 export class KrakenError extends Error {}
 
@@ -21,13 +22,18 @@ const ERRORS: [RegExp, string][] = [
   [/Invalid nonce/i, "Kraken rechazó el nonce. Usá una clave exclusiva para Meridiano, distinta de la del CLI de tu Mac."],
   [/Permission denied/i, "La clave no tiene permiso para consultar fondos u órdenes."],
   [/Rate limit|Too many/i, "Kraken pidió esperar por exceso de consultas. Se reintenta en la próxima vigilancia."],
+  [/Insufficient funds/i, "Kraken rechazó la orden por fondos insuficientes."],
+  [/Unknown asset pair/i, "Kraken no ofrece ese par."],
+  [/Unknown order/i, "Kraken no encuentra esa orden."],
 ];
 function explain(raw: string) { for (const [re, msg] of ERRORS) if (re.test(raw)) return msg; return "Kraken respondió: " + raw; }
 
-async function priv(path: string): Promise<any> {
-  const key = process.env.KRAKEN_API_KEY, secret = process.env.KRAKEN_API_SECRET;
-  if (!key || !secret) throw new KrakenError("Faltan KRAKEN_API_KEY y KRAKEN_API_SECRET en Vercel.");
-  const n = nonce(), body = new URLSearchParams({ nonce: n }).toString();
+// "read" usa la clave de solo lectura; "trade", la de operación (sin permiso de retiro).
+async function priv(path: string, params: Record<string, string> = {}, which: "read" | "trade" = "read"): Promise<any> {
+  const key = which === "trade" ? process.env.KRAKEN_TRADE_KEY : process.env.KRAKEN_API_KEY;
+  const secret = which === "trade" ? process.env.KRAKEN_TRADE_SECRET : process.env.KRAKEN_API_SECRET;
+  if (!key || !secret) throw new KrakenError(which === "trade" ? "Faltan KRAKEN_TRADE_KEY y KRAKEN_TRADE_SECRET en Vercel." : "Faltan KRAKEN_API_KEY y KRAKEN_API_SECRET en Vercel.");
+  const n = nonce(), body = new URLSearchParams({ nonce: n, ...params }).toString();
   let res: Response;
   try {
     res = await fetch(base() + path, { method: "POST", body, signal: AbortSignal.timeout(12_000),
@@ -100,4 +106,38 @@ export async function ohlcDaily(pair = "XBTAUD"): Promise<{ t: number; o: number
   const candles = rows.map((r) => ({ t: Number(r[0]) * 1000, o: +r[1], h: +r[2], l: +r[3], c: +r[4] }));
   candles.pop();
   return candles;
+}
+
+// ---------- Operación (clave de trading) ----------
+export type Meta = { ordermin: number; costmin: number; lotDecimals: number; pairDecimals: number };
+export async function pairMeta(pair: string): Promise<Meta> {
+  let j: any;
+  try { const r = await fetch(`${base()}/0/public/AssetPairs?pair=${encodeURIComponent(pair)}`, { signal: AbortSignal.timeout(10_000) }); j = await r.json(); }
+  catch { throw new KrakenError("No se pudo leer la configuración del par en Kraken."); }
+  if (j.error?.length) throw new KrakenError(explain(j.error.join(", ")));
+  const v: any = Object.values(j.result || {})[0];
+  if (!v) throw new KrakenError("Kraken no ofrece el par " + pair + ".");
+  return { ordermin: Number(v.ordermin || 0), costmin: Number(v.costmin || 0), lotDecimals: Number(v.lot_decimals ?? 8), pairDecimals: Number(v.pair_decimals ?? 2) };
+}
+export async function balanceWith(which: "read" | "trade") { return (await priv("/0/private/Balance", {}, which)) || {}; }
+export async function addOrder(p: Record<string, string>, validate = false): Promise<{ txid: string | null; descr: string }> {
+  const r = await priv("/0/private/AddOrder", validate ? { ...p, validate: "true" } : p, "trade");
+  return { txid: r?.txid?.[0] ?? null, descr: r?.descr?.order ?? "" };
+}
+export async function cancelOrder(txid: string) { return priv("/0/private/CancelOrder", { txid }, "trade"); }
+export type OrderInfo = { status: string; volExec: number; cost: number; fee: number; price: number };
+export async function queryOrder(txid: string): Promise<OrderInfo | null> {
+  const r = await priv("/0/private/QueryOrders", { txid }, "trade");
+  const o: any = r?.[txid]; if (!o) return null;
+  return { status: o.status, volExec: Number(o.vol_exec || 0), cost: Number(o.cost || 0), fee: Number(o.fee || 0), price: Number(o.price || 0) };
+}
+// Espera a que una orden de mercado se complete (normalmente es inmediato).
+export async function waitFilled(txid: string, tries = 6): Promise<OrderInfo> {
+  let last: OrderInfo | null = null;
+  for (let i = 0; i < tries; i++) {
+    last = await queryOrder(txid);
+    if (last && (last.status === "closed" || last.status === "canceled" || last.status === "expired")) return last;
+    await new Promise((r) => setTimeout(r, 700));
+  }
+  return last ?? { status: "unknown", volExec: 0, cost: 0, fee: 0, price: 0 };
 }

@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "test": "node scripts/e2e.mjs",
-    "test:unit": "node --experimental-strip-types scripts/unit.mjs && node --experimental-strip-types scripts/strategy-test.mjs"
+    "test:unit": "node --experimental-strip-types scripts/unit.mjs && node --experimental-strip-types scripts/strategy-test.mjs && node --experimental-strip-types scripts/risk-test.mjs"
   },
   "keywords": [],
   "author": "",
