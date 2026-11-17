@@ -17,11 +17,11 @@ await client.connect(new StreamableHTTPClientTransport(new URL(`${BASE}/api/k/${
 const call = async (name, args = {}) => { const r = await client.callTool({ name, arguments: args }); const t = r.content[0].text; return { err: !!r.isError, text: t, data: r.isError ? null : JSON.parse(t) }; };
 
 const tools = (await client.listTools()).tools.map((t) => t.name);
-check("lista de herramientas", tools.length === 17, tools.join(", "));
+check("lista de herramientas", tools.length === 19, tools.join(", "));
 check("no expone aprobar ni pausar", !tools.some((t) => /approve|resolve|pause/.test(t)));
 
 let s0 = await state();
-check("tablero lee la base", s0.accounts.length === 11 && s0.agents.length === 12, `${s0.accounts.length} cuentas, ${s0.agents.length} agentes`);
+check("tablero lee la base", s0.accounts.length === 11 && s0.agents.length === 13, `${s0.accounts.length} cuentas, ${s0.agents.length} agentes`);
 const ov = (await call("get_overview")).data;
 const net = s0.accounts.reduce((t, a) => t + a.aud, 0) - s0.liabs.reduce((t, a) => t + a.aud, 0);
 check("patrimonio coincide entre conector y tablero", ov.patrimonio_neto === Math.round(net), `${ov.patrimonio_neto}`);
@@ -86,10 +86,21 @@ if (process.env.E2E_RESET === "1") {
   const SECRET = process.env.KRAKEN_API_SECRET, D = 86400;
   const sign = (path, nonce, body) => createHmac("sha512", Buffer.from(SECRET, "base64")).update(Buffer.concat([Buffer.from(path), createHash("sha256").update(nonce + body).digest()])).digest("base64");
   const PRICES = { XBTAUD: 140000, HYPEUSD: 40, AUDUSD: 0.65, EURUSD: 1.08, USDCUSD: 1, BABYUSD: 0.02 };
-  let privateCalls = 0, badSig = 0;
+  let privateCalls = 0, badSig = 0, extra = 0;
+  // Historial diario simulado: 300 días ondulantes, más "extra" días de suba fuerte que el test va agregando.
+  const T0 = Date.UTC(2025, 0, 1);
+  const candles = () => {
+    const out = []; let pc = 100000;
+    for (let i = 0; i < 300 + extra + 1; i++) {
+      const c = i < 300 ? 100000 * (1 + 0.05 * Math.sin(i / 9)) : pc * 1.03, o = pc;
+      out.push([(T0 + i * 86400000) / 1000, String(o), String(Math.max(o, c) * 1.01), String(Math.min(o, c) * 0.99), String(c), "0", "1", 1]); pc = c;
+    }
+    return out;
+  };
   const mock = http.createServer((req, res) => {
     let body = ""; req.on("data", (c) => (body += c)); req.on("end", () => {
       const u = new URL(req.url, "http://x"), send = (o) => { res.setHeader("content-type", "application/json"); res.end(JSON.stringify(o)); };
+      if (u.pathname === "/0/public/OHLC") return send({ error: [], result: { XXBTZAUD: candles(), last: 0 } });
       if (u.pathname === "/0/public/Ticker") { const p = PRICES[u.searchParams.get("pair")]; return send(p ? { error: [], result: { X: { c: [String(p), "1"] } } } : { error: ["EQuery:Unknown asset pair"] }); }
       privateCalls++;
       const nonce = new URLSearchParams(body).get("nonce");
@@ -105,7 +116,7 @@ if (process.env.E2E_RESET === "1") {
   check("reset con BORRAR", (await post("/api/reset", { confirm: "BORRAR" })).ok);
   let r = await state();
   check("quedan cero cuentas, tareas y propuestas", r.accounts.length === 0 && r.tasks.length === 0 && r.props.length === 0 && !r.user.demo);
-  check("los 12 agentes se conservan, sin ejecuciones", r.agents.length === 12 && r.agents.every((a) => a.st === "idea"));
+  check("los 13 agentes se conservan, sin ejecuciones", r.agents.length === 13 && r.agents.every((a) => a.st === "idea"));
   check("no se puede resetear dos veces", (await post("/api/reset", { confirm: "BORRAR" })).status === 409);
   const sync = await (await post("/api/sync", {})).json();
   check("sincroniza Kraken con firma válida", sync.ok && privateCalls === 2 && badSig === 0, sync.summary);
@@ -125,6 +136,35 @@ if (process.env.E2E_RESET === "1") {
   check("refresh_data respeta 5 minutos entre corridas", (await call("refresh_data")).err);
   check("cron sin secreto rechazado", (await fetch(BASE + "/api/cron/watch")).status === 401);
   check("cron con secreto corre", (await fetch(BASE + "/api/cron/watch", { headers: { authorization: "Bearer " + process.env.CRON_SECRET } })).ok);
+  // ---------- mandato de trading simulado ----------
+  const tr = (b) => post("/api/trading", b);
+  check("piso mayor que capital es rechazado", (await tr({ action: "create", capital: 2000, floor: 2500, target: 5000 })).status === 400);
+  const od = await (await tr({ action: "odds", capital: 2000, floor: 1200, target: 5000 })).json();
+  check("probabilidades con y sin tendencia", od.trend && od.neutral && Math.abs(od.trend.target + od.trend.floor + od.trend.open - 1) < 1e-9 && od.data.days === 300, `objetivo ${(od.trend.target * 100).toFixed(1)}% / ${(od.neutral.target * 100).toFixed(1)}%`);
+  check("referencia sin ventaja 21,1%", Math.abs(od.zeroEdge - 800 / 3800) < 1e-9);
+  check("crea el mandato", (await tr({ action: "create", capital: 2000, floor: 1200, target: 5000 })).ok);
+  check("no permite dos mandatos a la vez", (await tr({ action: "create", capital: 2000, floor: 1200, target: 5000 })).status === 400);
+  r = await state();
+  const lastDay = T0 + 299 * 86400000;
+  check("arranca en la última vela cerrada, sin operar", r.trading.mandate.status === "active" && r.trading.mandate.lastT === lastDay && r.trading.mandate.equity === 2000 && r.trading.fills.length === 0);
+  check("Teo aparece trabajando", r.agents.find((a) => a.c === "M").st === "prog" && r.agents.find((a) => a.c === "M").p === "Teo Varela");
+  extra = 6; await post("/api/sync", {}); r = await state();
+  check("con la suba compra en la apertura siguiente a la señal", r.trading.fills.some((f) => f.kind === "buy") && r.trading.mandate.units > 0 && r.trading.mandate.stop > 0, `patrimonio ${Math.round(r.trading.mandate.equity)}`);
+  check("procesa los 6 días nuevos", r.trading.mandate.lastT === lastDay + 6 * 86400000 && r.trading.equity.length === 7);
+  check("Teo registra el paso diario", r.agents.find((a) => a.c === "M").st === "done");
+  const ts = await call("get_trading_status");
+  check("el conector lee el mandato", !ts.err && ts.data.mandate.status === "active");
+  check("simular de nuevo antes de 10 minutos se rechaza", (await call("simulate_trading_plan", { capital: 2000, floor: 1200, target: 5000 })).err);
+  check("pausa", (await tr({ action: "pause" })).ok);
+  extra = 8; await post("/api/sync", {});
+  check("en pausa no procesa días", (await state()).trading.mandate.lastT === lastDay + 6 * 86400000);
+  await tr({ action: "resume" });
+  check("al reanudar no simula los días en pausa", (await state()).trading.mandate.lastT === lastDay + 8 * 86400000);
+  extra = 60; await post("/api/sync", {}); r = await state();
+  check("con la suba sostenida llega al objetivo y pasa a USDC", r.trading.mandate.status === "target" && r.trading.fills[0].kind === "target" && r.trading.mandate.endValue >= 4900, `AUD ${Math.round(r.trading.mandate.endValue)}`);
+  check("deja una propuesta para revisar el resultado", r.props.some((p) => p.t === "El mandato simulado llegó al objetivo"));
+  check("después del objetivo se puede crear otro", (await tr({ action: "create", capital: 2000, floor: 1200, target: 5000 })).ok);
+  check("terminar a mano", (await tr({ action: "end" })).ok && (await state()).trading.mandate.status === "ended");
   mock.close();
 }
 

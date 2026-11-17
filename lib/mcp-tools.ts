@@ -2,6 +2,7 @@ import { z } from "zod";
 import { q, currentUser, logEvent } from "./db";
 import { latestBalances, agentRows, rel } from "./state";
 import { runWatch } from "./watch";
+import { tradingState, computeOdds } from "./trading";
 
 /*
  Herramientas que el Claude del usuario usa como motor de los agentes.
@@ -333,5 +334,27 @@ export function registerWatchTools(server: any) {
     const last = await q("select synced_at from source_status where user_id=$1 and source='watch' and synced_at > now() - interval '5 minutes'", [u.id]);
     if (last.length) return fail("Los datos se actualizaron hace menos de 5 minutos. Usá list_accounts para leerlos.");
     return ok(await runWatch("agente"));
+  });
+}
+
+export function registerTradingTools(server: any) {
+  server.registerTool("get_trading_status", {
+    title: "Estado del trading",
+    description: "Mandato de trading: modo, capital, piso, objetivo, patrimonio, posición, stop, últimas operaciones y probabilidades calculadas. Solo lectura.",
+    inputSchema: z.object({}),
+  }, async () => {
+    const u = await currentUser();
+    const t = await tradingState(u.id);
+    return ok({ ...t, equity: t.equity.slice(-30), nota: "Modo simulado: el motor usa precios reales de Kraken pero no envía órdenes. Capital, piso y objetivo solo los cambia el usuario." });
+  });
+  server.registerTool("simulate_trading_plan", {
+    title: "Simular un plan de trading",
+    description: "Calcula, con el historial diario real de BTC/AUD en Kraken, la probabilidad de llegar al objetivo antes que al piso: con la tendencia histórica, sin tendencia y contra comprar y mantener. Como máximo una vez cada 10 minutos.",
+    inputSchema: z.object({ capital: z.number().positive(), floor: z.number().positive(), target: z.number().positive() }),
+  }, async (a: any) => {
+    const u = await currentUser();
+    const last = await q("select 1 from source_status where user_id=$1 and source='trading_odds' and synced_at > now() - interval '10 minutes'", [u.id]);
+    if (last.length) return fail("Ya se calculó hace menos de 10 minutos. Leé el resultado con get_trading_status.");
+    try { return ok(await computeOdds(u.id, a)); } catch (e: any) { return fail(e?.message || "No se pudo simular."); }
   });
 }

@@ -187,6 +187,12 @@ summary{cursor:pointer;color:var(--accent);font-weight:500}
 .of-tag u:empty{display:none}
 .danger-zone{border-color:var(--crit)}
 .limit .sub{margin:2px 0 0;font-size:13px}
+.trange{margin:4px 0 18px}
+.trange-bar{position:relative;height:12px;border-radius:6px;background:linear-gradient(90deg,var(--crit-bg),var(--surface-2) 40%,var(--good-bg))}
+.trange-bar b{position:absolute;top:-5px;width:4px;height:22px;margin-left:-2px;border-radius:2px;background:var(--s1)}
+.trange-bar i.cap{position:absolute;top:0;width:2px;height:12px;background:var(--muted)}
+.trange-lbl{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-top:6px;font-family:var(--mono)}
+td .sub{font-size:12px}
 /* decisiones */
 .prop{border:1px solid var(--line);border-left:4px solid var(--info);border-radius:8px;padding:14px;background:var(--surface);display:flex;flex-direction:column;gap:8px}
 .prop.urg{border-left-color:var(--crit)} .prop.rev{border-left-color:var(--warn)} .prop.idea{border-left-color:var(--muted)}
@@ -246,12 +252,12 @@ ul.plain{margin:0;padding-left:18px} ul.plain li{margin:3px 0}
 (function(){
 "use strict";
 /* ---------- datos: llegan de /api/state ---------- */
-var FX,ZONES,ACCOUNTS,LIABS,MONTHS,NW_HIST,CONTRIB,FLOW,AGENTS,PROPS,HISTORY,FISCAL,COSTS,TASKS=[],SOURCES={},USER={},deferred=false;
+var FX,ZONES,ACCOUNTS,LIABS,MONTHS,NW_HIST,CONTRIB,FLOW,AGENTS,PROPS,HISTORY,FISCAL,COSTS,TASKS=[],SOURCES={},TRADING={},USER={},deferred=false;
 var ST={prog:["Programado","idle","◷"],run:["Ejecutándose","info","▶"],wait:["Esperando datos","warn","◌"],appr:["Pendiente de aprobación","warn","▲"],done:["Completado","good","✓"],err:["Con error","crit","✕"],off:["En pausa","idle","Ⅱ"],idea:["Conceptual","idle","·"]};
 
 /* ---------- estado ---------- */
 var state={base:"AUD",paused:false,agent:"E"};
-var VIEWS=[["resumen","Resumen"],["cuentas","Cuentas"],["caja","Caja"],["cartera","Cartera"],["agentes","Agentes"],["tareas","Tareas"],["sala","Oficina 3D"],["decisiones","Decisiones"],["fiscal","Fiscal"],["conexiones","Conexiones"],["sistema","Sistema"]];
+var VIEWS=[["resumen","Resumen"],["cuentas","Cuentas"],["caja","Caja"],["cartera","Cartera"],["trading","Trading"],["agentes","Agentes"],["tareas","Tareas"],["sala","Oficina 3D"],["decisiones","Decisiones"],["fiscal","Fiscal"],["conexiones","Conexiones"],["sistema","Sistema"]];
 
 /* ---------- utilidades ---------- */
 var nf0=new Intl.NumberFormat("es-AR",{maximumFractionDigits:0});
@@ -463,7 +469,7 @@ function officeData(){
       tes:{t:"Efectivo libre",big:money(cash),lines:[ACCOUNTS.length+" cuentas en "+ZONES.length+" jurisdicciones","Reserva fiscal aparte: "+money(rsv)]},
       fis:{t:"Calendario fiscal",big:FISCAL[0]?FISCAL[0].d:"Sin fechas",lines:FISCAL[0]?[FISCAL[0].t,"Reserva menos impuesto: "+money(rsv-liabs())]:[]},
       per:{t:"Tasa de ahorro",big:i?pct(sav/i):"Sin datos",lines:["Último mes: "+(FLOW.m[n]||""),"Ahorro "+money(sav)]},
-      cre:{t:"Ingreso del mes",big:money(i),lines:prev?[(i>=prev?"+":"−")+" "+pct(Math.abs(i-prev)/prev)+" contra el mes anterior"]:[]},
+      cre:(TRADING&&TRADING.mandate&&(TRADING.mandate.status==="active"||TRADING.mandate.status==="paused"))?{t:"Mandato de trading · simulado",big:"AUD "+nf0.format(TRADING.mandate.equity),lines:["Piso "+nf0.format(TRADING.mandate.floor)+" · objetivo "+nf0.format(TRADING.mandate.target),TRADING.mandate.units>0?"En BTC, stop "+nf0.format(TRADING.mandate.stop):"En AUD, esperando señal"]}:{t:"Ingreso del mes",big:money(i),lines:prev?[(i>=prev?"+":"−")+" "+pct(Math.abs(i-prev)/prev)+" contra el mes anterior"]:[]},
       dec:{t:"Decisiones pendientes",big:String(PROPS.length),lines:PROPS.slice(0,3).map(function(p){return p.t;})},
       rec:{t:"Meridiano",big:state.paused?"En pausa":"Operando",lines:[USER.demo?"Datos de ejemplo":(USER.name||""),active+" de "+AGENTS.length+" puestos cubiertos"]},
       pla:{t:"Conexiones",big:okc+" de "+racks.length+" al día",lines:["Un rack por fuente de datos","Verde al día · ámbar envejecido · rojo vencido"]}
@@ -510,6 +516,58 @@ V.tareas=function(){
   '<label class="wide">Contexto y datos<textarea id="tf-detail" maxlength="800" rows="2" placeholder="Montos, cuentas, fechas, lo que el agente necesite saber">'+esc(d.detail||"")+'</textarea></label>'+
   '<div class="wide tform-acts"><button class="btn primary" type="submit">Asignar tarea</button><span id="tf-msg" role="status"></span></div></form></section>'+
   '<div class="tboard">'+cols+'</div>';
+};
+var TSTAT={active:["Activo","good","▶"],paused:["En pausa","idle","Ⅱ"],target:["Llegó al objetivo","good","✓"],floor:["Tocó el piso","crit","✕"],ended:["Terminado","idle","■"]};
+var FK={buy:"Compra",sell:"Venta",stop:"Stop",target:"Objetivo",floor:"Piso"};
+function aud0(n){return "AUD "+nf0.format(Math.round(n));}
+function pctS(x){return nf1.format(x*100)+"%";}
+function dayF(t){return new Intl.DateTimeFormat("es-AR",{day:"2-digit",month:"short",timeZone:"UTC"}).format(new Date(t));}
+function oddsPanel(o){
+  if(!o)return '<section class="panel"><h2>Probabilidades del plan</h2><p class="sub">Antes de arriesgar nada, el motor repite tu plan 1.000 veces sobre el historial real de BTC/AUD en Kraken.</p><div class="tform-acts"><button type="button" class="btn primary" data-trade="odds">Calcular probabilidades</button><span class="tmsg" role="status"></span></div></section>';
+  var p=o.plan,row=function(name,x,note){return '<tr><td>'+name+(note?'<br><span class="sub">'+note+'</span>':'')+'</td><td class="r num">'+pctS(x.target)+'</td><td class="r num">'+pctS(x.floor)+'</td><td class="r num">'+pctS(x.open)+'</td></tr>';};
+  var bt=o.backtest,btTxt=bt.status==="target"?"llegó al objetivo":bt.status==="floor"?"tocó el piso":"seguía abierto con "+aud0(bt.equity);
+  return '<section class="panel"><h2>Probabilidades del plan</h2><p class="sub">Plan: '+aud0(p.capital)+', piso '+aud0(p.floor)+', objetivo '+aud0(p.target)+'. Horizonte de 2 años, 1.000 caminos armados con bloques de días reales de BTC/AUD ('+o.data.days+' días, '+dayF(o.data.from)+' a '+dayF(o.data.to)+'; BTC '+(o.data.change>=0?"+":"")+pctS(o.data.change)+' en el período).</p>'+
+  '<div class="scroll"><table><tr><th>Escenario</th><th class="r">Objetivo antes que piso</th><th class="r">Piso antes que objetivo</th><th class="r">Ninguno en 2 años</th></tr>'+
+  row("Estrategia, con la tendencia del período",o.trend,"Supone que el futuro se parece a estos "+o.data.days+" días")+
+  row("Estrategia, sin tendencia",o.neutral,"Quita la suba o baja promedio del período")+
+  row("Comprar BTC y no tocarlo, con la tendencia",o.trend.hold,"Referencia para saber si la estrategia aporta algo")+
+  row("Comprar BTC y no tocarlo, sin tendencia",o.neutral.hold,"")+
+  '</table></div><p class="sub" style="margin-top:10px">Referencia teórica sin ventaja ni costos: <b>'+pctS(o.zeroEdge)+'</b> de llegar al objetivo antes que al piso. Sobre el historial real, la estrategia '+btTxt+' después de '+bt.days+' días y '+bt.trades+(bt.trades===1?' operación':' operaciones')+', con una caída máxima de '+pctS(bt.maxDrawdown)+'. Calculado '+esc(relT(o.at))+'.</p>'+
+  '<div class="tform-acts"><button type="button" class="btn" data-trade="odds">Recalcular</button><span class="tmsg" role="status"></span></div></section>';
+}
+function relT(iso){var m=Math.round((Date.now()-new Date(iso).getTime())/60000);return m<60?"hace "+m+" min":m<2880?"hace "+Math.round(m/60)+" h":"hace "+Math.round(m/1440)+" días";}
+function eqChart(T){
+  var m=T.mandate,pts=T.equity;if(pts.length<2)return '<div class="empty">El gráfico aparece desde el segundo día procesado. El motor revisa una vez por día, con la vela diaria cerrada.</div>';
+  var W=1000,H=240,L=62,R=84,TP=12,B=26,vals=pts.map(function(x){return x[1];}).concat([m.floor,m.target]),lo=Math.min.apply(null,vals)*0.97,hi=Math.max.apply(null,vals)*1.02;
+  function X(i){return L+(W-L-R)*i/(pts.length-1);}function Y(v){return TP+(H-TP-B)*(1-(v-lo)/(hi-lo));}
+  var s='<svg viewBox="0 0 '+W+' '+H+'" role="img" aria-label="Patrimonio del mandato con piso y objetivo">';
+  [[m.target,"Objetivo","var(--good)"],[m.capital,"Capital","var(--muted)"],[m.floor,"Piso","var(--crit)"]].forEach(function(g){s+='<line x1="'+L+'" x2="'+(W-R)+'" y1="'+Y(g[0])+'" y2="'+Y(g[0])+'" stroke="'+g[2]+'" stroke-dasharray="4 4"/><text x="'+(W-R+6)+'" y="'+(Y(g[0])+4)+'" class="lbl">'+g[1]+'</text><text x="'+(L-8)+'" y="'+(Y(g[0])+4)+'" text-anchor="end">'+nf0.format(g[0])+'</text>';});
+  s+='<path d="'+pts.map(function(x,i){return (i?"L":"M")+X(i).toFixed(1)+" "+Y(x[1]).toFixed(1);}).join(" ")+'" fill="none" stroke="var(--s1)" stroke-width="2"/>';
+  s+='<circle cx="'+X(pts.length-1)+'" cy="'+Y(pts[pts.length-1][1])+'" r="4" fill="var(--s1)" stroke="var(--surface)" stroke-width="2"/>';
+  s+='<text x="'+L+'" y="'+(H-6)+'">'+dayF(pts[0][0])+'</text><text x="'+(W-R)+'" y="'+(H-6)+'" text-anchor="end">'+dayF(pts[pts.length-1][0])+'</text></svg>';
+  return '<div class="chart">'+s+'</div>';
+}
+V.trading=function(){
+  var T=TRADING||{},m=T.mandate,live=m&&(m.status==="active"||m.status==="paused");
+  var intro='<div class="sim">Modo simulado: el motor usa precios reales de Kraken y aplica tus límites, pero no envía órdenes. El paso a dinero real necesita tu confirmación explícita y una clave de Kraken que pueda operar sin poder retirar.</div>';
+  var strat='<section class="panel"><h2>Cómo decide el motor</h2><ul class="plain"><li>Compra BTC con todo el capital cuando el cierre diario supera la media de 50 días y el máximo de los 20 días anteriores.</li><li>Vende cuando el cierre cae debajo de la media de 50 días, o si toca el stop.</li><li>El stop es el más alto entre un stop móvil (máximo desde la compra menos 3 veces el rango diario promedio) y el precio que deja el patrimonio en el piso más 1%.</li><li>Decide al cierre y ejecuta en la apertura siguiente. Supone 0,4% de comisión y 0,1% de deslizamiento por operación.</li><li>Al llegar al objetivo vende todo y pasa a USDC. Si se queda sin margen sobre el piso, termina en AUD. Un hueco de precio puede perforar el piso.</li></ul></section>';
+  if(!live){
+    var d=state.tdraft||{capital:2000,floor:1200,target:5000},prev=m?'<section class="panel" style="margin-bottom:16px"><h2>Último mandato</h2><p>'+pill(TSTAT[m.status][0],TSTAT[m.status][1],TSTAT[m.status][2])+' Terminó con <b class="num">'+aud0(m.endValue!==null&&m.endValue!==undefined?m.endValue:m.equity)+'</b> sobre un capital de '+aud0(m.capital)+'.</p></section>':'';
+    return intro+prev+'<div class="grid g-2"><section class="panel"><h2>Nuevo mandato</h2><p class="sub">Definí cuánto arriesga el motor. Solo vos podés cambiar estos números.</p>'+
+    '<form id="tradeForm" class="tform"><label>Capital, AUD<input id="tr-capital" type="number" min="1" step="1" value="'+d.capital+'"></label><label>Piso, AUD<input id="tr-floor" type="number" min="1" step="1" value="'+d.floor+'"></label><label>Objetivo, AUD<input id="tr-target" type="number" min="1" step="1" value="'+d.target+'"></label>'+
+    '<p class="wide sub" style="margin:0">Al llegar al objetivo: todo a USDC. Mercado: BTC/AUD en Kraken.</p><div class="wide tform-acts"><button type="button" class="btn" data-trade="odds">Calcular probabilidades</button><button type="button" class="btn primary" data-trade="create">Empezar mandato simulado</button><span class="tmsg" role="status"></span></div></form></section>'+strat+'</div><div style="margin-top:16px">'+oddsPanel(T.odds)+'</div>';
+  }
+  var span=m.target-m.floor,pos=Math.max(0,Math.min(1,(m.equity-m.floor)/span)),cap=(m.capital-m.floor)/span,inBtc=m.units>0;
+  var fills=T.fills.length?'<div class="scroll"><table><tr><th>Día</th><th>Operación</th><th class="r">Precio</th><th class="r">Monto</th><th class="r">Comisión</th><th class="r">Patrimonio</th><th>Motivo</th></tr>'+T.fills.map(function(f){return '<tr><td class="num">'+dayF(f.t)+'</td><td>'+FK[f.kind]+'</td><td class="r num">'+(f.kind==="target"||f.kind==="floor"?"":nf0.format(f.price))+'</td><td class="r num">'+nf0.format(f.aud)+'</td><td class="r num">'+nf1.format(f.fee)+'</td><td class="r num">'+nf0.format(f.equity)+'</td><td>'+esc(f.note)+'</td></tr>';}).join("")+'</table></div>':'<div class="empty">Todavía no operó. Compra solo cuando aparece la señal de tendencia; puede tardar días o semanas.</div>';
+  return intro+'<div class="grid g-4" style="margin-bottom:16px">'+
+   '<div class="tile"><div class="k">Patrimonio del mandato</div><div class="v">'+aud0(m.equity)+'</div><div class="d"><span class="'+(m.equity>=m.capital?"up":"down")+'">'+(m.equity>=m.capital?"▲ ":"▼ ")+pctS(Math.abs(m.equity/m.capital-1))+'</span> sobre '+aud0(m.capital)+'</div></div>'+
+   '<div class="tile"><div class="k">Estado</div><div class="v" style="font-size:20px;margin-top:8px">'+pill(TSTAT[m.status][0],TSTAT[m.status][1],TSTAT[m.status][2])+'</div><div class="d">Último día procesado: '+dayF(m.lastT)+'</div></div>'+
+   '<div class="tile"><div class="k">Posición</div><div class="v" style="font-size:20px">'+(inBtc?"BTC "+m.units.toFixed(6).replace(".",","):"En AUD")+'</div><div class="d">'+(inBtc?"Compra a "+nf0.format(m.entry)+" · stop "+nf0.format(m.stop):m.pending==="buy"?"Compra programada para mañana":"Esperando señal")+'</div></div>'+
+   '<div class="tile"><div class="k">Margen sobre el piso</div><div class="v">'+aud0(m.equity-m.floor)+'</div><div class="d">Faltan '+aud0(Math.max(0,m.target-m.equity))+' para el objetivo</div></div></div>'+
+   '<section class="panel" style="margin-bottom:16px"><h2>Entre el piso y el objetivo</h2><div class="trange" role="img" aria-label="Patrimonio '+aud0(m.equity)+' entre piso '+aud0(m.floor)+' y objetivo '+aud0(m.target)+'"><div class="trange-bar"><i style="left:'+(cap*100).toFixed(1)+'%" class="cap"></i><b style="left:'+(pos*100).toFixed(1)+'%"></b></div><div class="trange-lbl"><span>Piso '+aud0(m.floor)+'</span><span>Capital '+aud0(m.capital)+'</span><span>Objetivo '+aud0(m.target)+'</span></div></div>'+
+   eqChart(T)+'<div class="tform-acts" style="margin-top:12px">'+(m.status==="active"?'<button type="button" class="btn" data-trade="pause">Pausar</button>':'<button type="button" class="btn primary" data-trade="resume">Reanudar</button>')+'<button type="button" class="btn danger" data-trade="end" data-confirm="0">Terminar mandato</button><span class="tmsg" role="status"></span></div></section>'+
+   '<section class="panel" style="margin-bottom:16px"><h2>Operaciones</h2>'+fills+'</section>'+
+   oddsPanel(T.odds)+'<div style="margin-top:16px">'+strat+'</div>';
 };
 V.decisiones=function(){
   var p=pending();
@@ -582,6 +640,14 @@ document.getElementById("view").addEventListener("click",function(e){
   if(st){pickAgent(st.dataset.agent);return;}
   var b=e.target.closest("[data-act]");
   if(b){b.disabled=true;post("/api/proposals/"+b.dataset.id,{action:b.dataset.act});return;}
+  var tb=e.target.closest("[data-trade]");
+  if(tb){var act=tb.dataset.trade,msg=tb.parentNode.querySelector(".tmsg");
+    if(act==="end"&&tb.dataset.confirm==="0"){tb.dataset.confirm="1";tb.textContent="Confirmar: terminar";if(msg)msg.textContent="La posición simulada queda congelada y no se puede reanudar.";return;}
+    var body={action:act};if(document.getElementById("tr-capital")){body.capital=val("tr-capital");body.floor=val("tr-floor");body.target=val("tr-target");state.tdraft={capital:body.capital,floor:body.floor,target:body.target};}
+    tb.disabled=true;if(msg)msg.textContent=act==="odds"?"Simulando 2.000 caminos con el historial de Kraken…":act==="create"?"Creando el mandato…":"Guardando…";
+    fetch("/api/trading",{method:"POST",credentials:"same-origin",headers:{"content-type":"application/json"},body:JSON.stringify(body)})
+    .then(function(r){if(r.status===401){location.href="/login";return;}return r.json().then(function(j){tb.disabled=false;if(!r.ok){if(msg)msg.textContent=j.error||"No se pudo completar.";return;}if(msg)msg.textContent="Listo.";document.activeElement&&document.activeElement.blur&&document.activeElement.blur();lastJson="";load();});})
+    .catch(function(){tb.disabled=false;if(msg)msg.textContent="No se pudo conectar. Revisá tu conexión.";});return;}
   var sy=e.target.closest("[data-sync]");
   if(sy){sy.disabled=true;var sm=document.getElementById("syncMsg");sm.textContent="Sincronizando y revisando…";
     fetch("/api/sync",{method:"POST",credentials:"same-origin"}).then(function(r){if(r.status===401){location.href="/login";return;}return r.json().then(function(j){sm.textContent=j.summary||"Listo.";sy.disabled=false;setTimeout(load,300);});})
@@ -616,7 +682,7 @@ setInterval(function(){document.querySelectorAll("[data-tz]").forEach(function(e
 var lastJson="";
 function apply(d,json){
   var first=!lastJson;lastJson=json;
-  FX=d.fx;ZONES=d.zones;ACCOUNTS=d.accounts;LIABS=d.liabs;MONTHS=d.months;NW_HIST=d.nwHist;CONTRIB=d.contrib;FLOW=d.flow;PROPS=d.props;TASKS=d.tasks||[];SOURCES=d.sources||{};HISTORY=d.history;FISCAL=d.fiscal;COSTS=d.costs;USER=d.user;
+  FX=d.fx;ZONES=d.zones;ACCOUNTS=d.accounts;LIABS=d.liabs;MONTHS=d.months;NW_HIST=d.nwHist;CONTRIB=d.contrib;FLOW=d.flow;PROPS=d.props;TASKS=d.tasks||[];SOURCES=d.sources||{};TRADING=d.trading||{};HISTORY=d.history;FISCAL=d.fiscal;COSTS=d.costs;USER=d.user;
   if(AGENTS&&AGENTS.length===d.agents.length){d.agents.forEach(function(a,i){Object.assign(AGENTS[i],a);});}else{AGENTS=d.agents;}
   state.paused=d.paused;if(first&&FX[d.base])state.base=d.base;
   document.getElementById("demoBadge").hidden=!USER.demo;

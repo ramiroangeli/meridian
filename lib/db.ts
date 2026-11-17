@@ -1,6 +1,6 @@
 import { SCHEMA, TABLES } from "./schema";
 import { seed } from "./seed";
-import { ORG_SCHEMA, fillOrg, BRIEF_SCHEMA, fillBriefs } from "./org";
+import { ORG_SCHEMA, fillOrg, BRIEF_SCHEMA, fillBriefs, ensureAgents } from "./org";
 
 export type Run = (text: string, params?: unknown[]) => Promise<any[]>;
 const g = globalThis as unknown as { __meridiano?: Promise<Run> };
@@ -36,6 +36,7 @@ async function init(): Promise<Run> {
   await fillOrg(run);
   for (const s of BRIEF_SCHEMA) await run(s);
   await fillBriefs(run);
+  await ensureAgents(run);
   return run;
 }
 

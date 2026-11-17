@@ -1,6 +1,7 @@
 import { q, currentUser, logEvent } from "./db";
 import { latestBalances } from "./state";
 import { evaluate, type Alert } from "./rules";
+import { stepMandates } from "./trading";
 import { krakenConfigured, fetchKraken, fxPerAud, priceAud, assetClass, clearTickerCache, FIAT, type OpenOrder } from "./kraken";
 
 export const KRAKEN_CONN = "API Kraken (servidor)";
@@ -47,8 +48,12 @@ export type WatchResult = { ok: boolean; summary: string; alerts: string[]; task
 export async function runWatch(trigger: "cron" | "manual" | "agente"): Promise<WatchResult> {
   clearTickerCache();
   const u = await currentUser();
-  if (u.demo) return { ok: true, summary: "Datos de ejemplo: la vigilancia se activa cuando empieces con tus datos.", alerts: [], tasks: 0 };
+  // El mandato de trading usa precios públicos de Kraken, así que corre también con datos de ejemplo.
+  let tradeNote: string | null = null;
+  try { tradeNote = await stepMandates(u.id); } catch (e: any) { tradeNote = "Trading con error: " + (e?.message || "desconocido"); }
+  if (u.demo) return { ok: true, summary: "Datos de ejemplo: la vigilancia se activa cuando empieces con tus datos." + (tradeNote ? " " + tradeNote + "." : ""), alerts: [], tasks: 0 };
   const uid = u.id, notes: string[] = [];
+  if (tradeNote) notes.push(tradeNote);
 
   const fx = await fxPerAud();
   if (fx) { for (const [c, r] of Object.entries(fx)) await q("insert into fx_rates values ($1,$2,$3) on conflict (user_id, currency) do update set per_base=excluded.per_base", [uid, c, r]); }

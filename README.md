@@ -83,3 +83,11 @@ Límites contra bucles: 40 tareas entre agentes por día, 12 abiertas por agente
 Variables nuevas en Vercel: `KRAKEN_API_KEY`, `KRAKEN_API_SECRET` (clave exclusiva para Meridiano, solo con permisos de consulta) y `CRON_SECRET`.
 
 Pruebas: `npm run test:unit` (firma de Kraken contra el ejemplo oficial y reglas) y `npm test` con el servidor en marcha. Con `E2E_RESET=1` y un Kraken simulado se prueba también el paso a datos reales.
+
+## Trading (modo simulado)
+
+- `lib/strategy.ts`: motor puro. Tendencia diaria sobre BTC/AUD: entra con cierre sobre la media de 50 días y el máximo de 20; sale bajo la media o por stop (móvil de 3 ATR, nunca por debajo del precio que protege el piso). Decide al cierre y ejecuta en la apertura siguiente, con 0,4% de comisión y 0,1% de deslizamiento.
+- Mandato: capital, piso y objetivo los fija solo el usuario. Al objetivo vende todo y pasa a USDC; sin margen sobre el piso, termina en AUD. Un hueco de precio puede perforar el piso y queda registrado.
+- `odds()`: Monte Carlo por bloques con el historial diario real de Kraken, con y sin la tendencia del período, contra comprar y mantener.
+- `lib/trading.ts`: el paso diario lo corre la vigilancia. No hay código que envíe órdenes reales.
+- Agente M, Teo Varela (Head of Trading), con las herramientas `get_trading_status` y `simulate_trading_plan`.

@@ -120,6 +120,28 @@ export const SCHEMA: string[] = [
      aud numeric not null,
      primary key (asset, day))`,
   `alter table net_worth_history alter column contributions drop not null`,
+  `create table if not exists trading_mandates (
+     id uuid primary key default gen_random_uuid(),
+     user_id uuid not null references users(id) on delete cascade,
+     pair text not null default 'XBTAUD',
+     mode text not null default 'paper' check (mode in ('paper','live')),
+     capital numeric not null, floor numeric not null, target numeric not null,
+     end_asset text not null default 'USDC',
+     status text not null default 'active' check (status in ('active','paused','floor','target','ended')),
+     book jsonb not null, params jsonb not null,
+     last_t bigint not null,
+     created_at timestamptz not null default now(), ended_at timestamptz)`,
+  `create table if not exists trading_fills (
+     id uuid primary key default gen_random_uuid(),
+     user_id uuid not null references users(id) on delete cascade,
+     mandate_id uuid not null references trading_mandates(id) on delete cascade,
+     t bigint not null, kind text not null, price numeric not null, units numeric not null,
+     aud numeric not null, fee numeric not null, equity numeric not null, note text not null default '',
+     created_at timestamptz not null default now())`,
+  `create table if not exists trading_equity (
+     mandate_id uuid not null references trading_mandates(id) on delete cascade,
+     t bigint not null, equity numeric not null, price numeric not null,
+     primary key (mandate_id, t))`,
 ];
 
-export const TABLES = ["users", "accounts", "balances", "liabilities", "transactions", "net_worth_history", "agents", "agent_runs", "proposals", "events", "fiscal_items", "fx_rates", "agent_tasks", "source_status", "price_history"];
+export const TABLES = ["users", "accounts", "balances", "liabilities", "transactions", "net_worth_history", "agents", "agent_runs", "proposals", "events", "fiscal_items", "fx_rates", "agent_tasks", "source_status", "price_history", "trading_mandates", "trading_fills", "trading_equity"];

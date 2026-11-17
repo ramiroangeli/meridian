@@ -123,3 +123,30 @@ export async function fillBriefs(run: Run) {
       "insert into agent_tasks (user_id,from_code,to_code,title,detail,priority,status,result,created_at,updated_at) values ($1,$2,$3,$4,$5,$6,$7,$8, now() - make_interval(mins => $9), now() - make_interval(mins => $9))",
       [uid, r[0], r[1], r[2], r[3], r[4], r[5], r[5] === "done" ? "Lección 5 publicada" : r[5] === "blocked" ? "Falta acceso a la consola del exchange" : "", r[6]]);
 }
+
+// Agentes agregados después del lanzamiento. Se crean en cada usuario si faltan.
+const EXTRA: Record<string, { name: string; objective: string; data: string; deliverables: string; permissions: string; kpi: string; depends_on: string; escalation: string; cost_note: string }> = {
+  M: { name: "Trading", objective: "Opera un mandato con capital, piso y objetivo fijados por el usuario, y mide si la estrategia le gana a comprar y mantener.",
+    data: "Velas diarias de Kraken, mandato, operaciones simuladas", deliverables: "Probabilidades del plan, operaciones, resultado del mandato",
+    permissions: "Modo simulado: no envía órdenes. No cambia piso, objetivo ni capital.", kpi: "Resultado neto contra comprar y mantener, caída máxima",
+    depends_on: "Mercados, Seguridad", escalation: "El mandato toca el piso o el objetivo, o un hueco perfora el piso", cost_note: "Sin costo de IA: el motor es código" },
+};
+ORG.M = { persona: "Teo Varela", title: "Head of Trading", area: "cre", model: "Claude Sonnet · explicar operaciones" };
+SCHEDULES.M = "Diario, automático por código · revisión semanal";
+BRIEFS.M = `Sos Teo Varela, Head of Trading. Supervisás el mandato de trading; el motor que decide compras y ventas es código con reglas fijas.
+- Leé el estado con get_trading_status: patrimonio, posición, stop, operaciones y probabilidades.
+- Explicá cada operación en lenguaje simple y compará el resultado contra comprar y mantener BTC.
+- Nunca cambies capital, piso, objetivo ni reglas: eso lo decide el usuario en el tablero.
+- Si el patrimonio queda a menos de 10% del piso, o un hueco de precio lo perfora, dejá una tarea a Alma y una propuesta urgente.
+- No promuevas el paso a dinero real: solo informá si el simulado cumplió el criterio (ganarle a comprar y mantener en al menos 30 operaciones).`;
+
+export async function ensureAgents(run: Run) {
+  const users = await run("select id from users");
+  for (const u of users)
+    for (const [code, e] of Object.entries(EXTRA)) {
+      const o = ORG[code];
+      await run(`insert into agents (user_id,code,name,objective,data,deliverables,permissions,kpi,depends_on,escalation,cost_note,implemented,persona,title,area,model,brief,schedule)
+                 select $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,false,$12,$13,$14,$15,$16,$17 where not exists (select 1 from agents where user_id=$1 and code=$2)`,
+        [u.id, code, e.name, e.objective, e.data, e.deliverables, e.permissions, e.kpi, e.depends_on, e.escalation, e.cost_note, o.persona, o.title, o.area, o.model, BRIEFS[code], SCHEDULES[code]]);
+    }
+}

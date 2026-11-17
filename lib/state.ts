@@ -1,4 +1,5 @@
 import { q, currentUser } from "./db";
+import { tradingState } from "./trading";
 
 const MES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 const mes = (ym: string) => MES[Number(ym.slice(5, 7)) - 1];
@@ -83,6 +84,7 @@ export async function buildState() {
     months: h.map((r) => mes(r.month)),
     nwHist: h.map((r) => r.net),
     contrib: h.map((r) => r.c),
+    trading: await tradingState(uid),
     sources: { kraken: src("kraken"), watch: src("watch"), krakenConfigured: !!(process.env.KRAKEN_API_KEY && process.env.KRAKEN_API_SECRET), cron: !!process.env.CRON_SECRET },
     flow: {
       m: months.map(mes),

@@ -88,3 +88,16 @@ export async function fetchKraken(): Promise<{ holdings: Holding[]; open: OpenOr
   const open = Object.entries(oo).map(([id, o]: [string, any]) => ({ id, pair: o.descr?.pair || "", side: o.descr?.type || "", type: o.descr?.ordertype || "", price: o.descr?.price || "", volume: String(o.vol ?? ""), opened: Number(o.opentm || 0) * 1000 }));
   return { holdings, open };
 }
+
+// Velas diarias públicas (hasta 720 días). La última es el día en curso y se descarta por incompleta.
+export async function ohlcDaily(pair = "XBTAUD"): Promise<{ t: number; o: number; h: number; l: number; c: number }[]> {
+  let j: any;
+  try { const r = await fetch(`${base()}/0/public/OHLC?pair=${encodeURIComponent(pair)}&interval=1440`, { signal: AbortSignal.timeout(15_000) }); j = await r.json(); }
+  catch { throw new KrakenError("No se pudo leer el historial de precios de Kraken."); }
+  if (j.error?.length) throw new KrakenError(explain(j.error.join(", ")));
+  const key = Object.keys(j.result || {}).find((k) => k !== "last");
+  const rows: any[] = key ? j.result[key] : [];
+  const candles = rows.map((r) => ({ t: Number(r[0]) * 1000, o: +r[1], h: +r[2], l: +r[3], c: +r[4] }));
+  candles.pop();
+  return candles;
+}
