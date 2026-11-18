@@ -85,11 +85,11 @@ check("reanudado", (await state()).paused === false);
 if (process.env.E2E_RESET === "1") {
   const SECRET = process.env.KRAKEN_API_SECRET, D = 86400;
   const sign = (path, nonce, body) => createHmac("sha512", Buffer.from(SECRET, "base64")).update(Buffer.concat([Buffer.from(path), createHash("sha256").update(nonce + body).digest()])).digest("base64");
-  const PRICES = { ADAAUD: 1.2, PEPEAUD: 0.00002, ETHAUD: 5000, SOLAUD: 300, XRPAUD: 3.5, USDCAUD: 1.54, XBTAUD: 140000, HYPEUSD: 40, AUDUSD: 0.65, EURUSD: 1.08, USDCUSD: 1, BABYUSD: 0.02 };
+  const PRICES = { ADAUSD: 0.78, DOGEUSD: 0.25, ADAAUD: 1.2, PEPEAUD: 0.00002, ETHAUD: 5000, SOLAUD: 300, XRPAUD: 3.5, USDCAUD: 1.54, XBTAUD: 140000, HYPEUSD: 40, AUDUSD: 0.65, EURUSD: 1.08, USDCUSD: 1, BABYUSD: 0.02 };
   let privateCalls = 0, badSig = 0, extra = 0, validated = 0, seq = 0;
   const ORDERS = {}; // órdenes reales simuladas: mercado se completa al instante; stop-loss se ejecuta si el precio lo toca
-  const META = { XBTAUD: ["0.00005", 1, "XXBTZAUD", "XXBT"], ETHAUD: ["0.002", 2, "XETHZAUD", "XETH"], SOLAUD: ["0.02", 2, "SOLAUD", "SOL"], XRPAUD: ["2", 5, "XXRPZAUD", "XXRP"], USDCAUD: ["5", 4, "USDCAUD", "USDC"], ADAAUD: ["5", 5, "ADAAUD", "ADA"], PEPEAUD: ["100000", 9, "PEPEAUD", "PEPE"] };
-  const VOL = { ADAAUD: 500000, PEPEAUD: 50000000 }; // PEPE: AUD 1.000 en 24 h, no pasa el filtro
+  const META = { XBTAUD: ["0.00005", 1, "XXBTZAUD", "XXBT"], ETHAUD: ["0.002", 2, "XETHZAUD", "XETH"], SOLAUD: ["0.02", 2, "SOLAUD", "SOL"], XRPAUD: ["2", 5, "XXRPZAUD", "XXRP"], USDCAUD: ["5", 4, "USDCAUD", "USDC"], ADAAUD: ["5", 5, "ADAAUD", "ADA"], PEPEAUD: ["100000", 9, "PEPEAUD", "PEPE"], AUDUSD: ["5", 5, "AUDUSD", "ZAUD", "ZUSD"], ADAUSD: ["5", 6, "ADAUSD", "ADA", "ZUSD"], DOGEUSD: ["50", 7, "XDGUSD", "XXDG", "ZUSD"], USDCUSD: ["5", 4, "USDCUSD", "USDC", "ZUSD"] };
+  const VOL = { ADAAUD: 500000, PEPEAUD: 50000000, ADAUSD: 1000000, DOGEUSD: 10000000 }; // PEPE: AUD 1.000 en 24 h, no pasa el filtro
   const keyOf = (alt) => (META[alt] ? META[alt][2] : alt), altOf = (k) => Object.keys(META).find((a) => META[a][2] === k || a === k);
   const tick = (alt) => { const p = PRICES[alt]; return { a: [String(p * 1.0003), "1", "1"], b: [String(p * 0.9997), "1", "1"], c: [String(p), "1"], v: ["1", String(VOL[alt] ?? 1000)], p: [String(p), String(p)], o: String(p) }; };
   // Historial diario simulado: 300 días ondulantes, más "extra" días de suba fuerte que el test va agregando.
@@ -107,7 +107,7 @@ if (process.env.E2E_RESET === "1") {
       const u = new URL(req.url, "http://x"), send = (o) => { res.setHeader("content-type", "application/json"); res.end(JSON.stringify(o)); };
       if (u.pathname === "/0/public/OHLC") return send({ error: [], result: { XXBTZAUD: candles(), last: 0 } });
       if (u.pathname === "/0/public/AssetPairs") {
-        const info = (alt) => { const mt = META[alt]; return { altname: alt, base: mt[3], quote: "ZAUD", status: "online", ordermin: mt[0], costmin: "0.5", lot_decimals: 8, pair_decimals: mt[1] }; };
+        const info = (alt) => { const mt = META[alt]; return { altname: alt, base: mt[3], quote: mt[4] || "ZAUD", status: "online", ordermin: mt[0], costmin: "0.5", lot_decimals: 8, pair_decimals: mt[1] }; };
         const pr = u.searchParams.get("pair");
         if (!pr) return send({ error: [], result: Object.fromEntries(Object.keys(META).map((a) => [META[a][2], info(a)])) });
         const alt = altOf(pr); return send(alt ? { error: [], result: { [keyOf(alt)]: info(alt) } } : { error: ["EQuery:Unknown asset pair"] });
@@ -198,8 +198,9 @@ if (process.env.E2E_RESET === "1") {
 
   // ---------- mandato con dinero real (contra el Kraken simulado) ----------
   const scan = await call("scan_market");
-  check("Nora barre los pares AUD sin estables", !scan.err && scan.data.pares_aud === 6 && scan.data.candidatas.some((c) => c.moneda === "ADA") && !scan.data.candidatas.some((c) => c.moneda === "PEPE" || c.moneda === "USDC"), scan.text.slice(0, 120));
-  const wl = await call("set_watchlist", { items: [{ asset: "ADA", thesis: "Tendencia diaria limpia y fuerza relativa contra BTC." }, { asset: "PEPE", thesis: "Prueba de una moneda sin liquidez suficiente." }, { asset: "DOGE", thesis: "Prueba de una moneda que no cotiza contra AUD." }] });
+  const adaRow = !scan.err && scan.data.candidatas.find((c) => c.moneda === "ADA");
+  check("Nora barre pares AUD y USD sin estables", !scan.err && scan.data.pares === 7 && adaRow && adaRow.cotiza_en === "USD" && scan.data.candidatas.some((c) => c.moneda === "DOGE") && !scan.data.candidatas.some((c) => ["PEPE", "USDC", "AUD"].includes(c.moneda)), scan.text.slice(0, 160));
+  const wl = await call("set_watchlist", { items: [{ asset: "ADA", thesis: "Tendencia diaria limpia y fuerza relativa contra BTC." }, { asset: "PEPE", thesis: "Prueba de una moneda sin liquidez suficiente." }, { asset: "FOO", thesis: "Prueba de una moneda que no existe en Kraken." }] });
   check("la lista descarta lo ilíquido y lo que no cotiza en AUD", !wl.err && wl.data.lista.join() === "ADA" && wl.data.rechazadas.length === 2, wl.text.slice(0, 160));
   const keys = await (await tr({ action: "check_keys" })).json();
   check("prueba de claves sin mover dinero", /^ok/.test(keys.read) && /^ok/.test(keys.trade) && validated === 1 && Object.keys(ORDERS).length === 0, JSON.stringify(keys));
@@ -210,7 +211,7 @@ if (process.env.E2E_RESET === "1") {
   r = await state();
   check("tablero muestra ensayo", r.trading.mandate.mode === "live" && r.trading.live.rehearsal && r.trading.live.cash === 2000);
   const snap = await call("market_snapshot");
-  check("Teo ve las 4 principales y la lista de Nora", !snap.err && snap.data.monedas.map((m) => m.moneda).join() === "BTC,ETH,SOL,XRP,ADA" && snap.data.monedas.every((m) => m.media_50d > 0 && m.atr_pct > 0), snap.text.slice(0, 80));
+  check("Teo ve las 4 principales y la lista de Nora", !snap.err && snap.data.monedas.map((m) => m.moneda).join() === "BTC,ETH,SOL,XRP,ADA" && snap.data.monedas[4].cotiza_en === "USD" && snap.data.monedas[0].cotiza_en === "AUD" && snap.data.monedas.every((m) => m.media_50d > 0 && m.atr_pct > 0), snap.text.slice(0, 80));
   const btcTrade = { asset: "BTC", amount_aud: 800, stop_loss: 126000, take_profit: 170000, rationale: "Tendencia diaria sobre la media de 50; stop a 2 ATR, objetivo 2R." };
   const reh = await call("place_trade", btcTrade);
   check("en ensayo Kraken solo valida", !reh.err && reh.data.estado === "ensayo" && validated === 2 && Object.keys(ORDERS).length === 0, reh.text.slice(0, 80));
@@ -246,16 +247,19 @@ if (process.env.E2E_RESET === "1") {
   check("en pausa global no abre operaciones", (await call("place_trade", { asset: "SOL", amount_aud: 500, stop_loss: 270, rationale: "Prueba durante la pausa global del sistema." })).err);
   await post("/api/pause", { paused: false });
   const cashNow = (await state()).trading.live.cash;
-  const adaBig = await call("place_trade", { asset: "ADA", amount_aud: 900, stop_loss: 1.1, rationale: "ADA de la lista de Nora, prueba del tope por moneda." });
+  const adaBig = await call("place_trade", { asset: "ADA", amount_aud: 900, stop_loss: 0.7, rationale: "ADA de la lista de Nora, prueba del tope por moneda." });
   check("fuera de las 4 principales, máximo 35% del patrimonio", adaBig.err && /35%/.test(adaBig.text), adaBig.text.slice(0, 100));
   check("moneda fuera de la lista se rechaza", (await call("place_trade", { asset: "PEPE", amount_aud: 100, stop_loss: 0.000015, rationale: "Prueba de una moneda que no está en la lista." })).err);
-  const ada = await call("place_trade", { asset: "ADA", amount_aud: 300, stop_loss: 1.08, take_profit: 1.5, rationale: "ADA de la lista de Nora: tendencia y fuerza contra BTC." });
-  check("opera una moneda de la lista de Nora", !ada.err && ada.data.estado === "ejecutada" && Object.values(ORDERS).some((o) => o.pair === "ADAAUD" && o.ordertype === "stop-loss" && o.status === "open"), ada.text.slice(0, 100));
+  const ada = await call("place_trade", { asset: "ADA", amount_aud: 300, stop_loss: 0.7, take_profit: 0.95, rationale: "ADA de la lista de Nora: tendencia y fuerza contra BTC." });
+  check("opera una moneda de la lista de Nora contra USD", !ada.err && ada.data.estado === "ejecutada" && ada.data.moneda === "USD" && Object.values(ORDERS).some((o) => o.pair === "ADAUSD" && o.ordertype === "stop-loss" && o.status === "open" && o.stop === "0.7"), ada.text.slice(0, 160));
+  check("convirtió AUD a USD dentro del mandato", Object.values(ORDERS).some((o) => o.pair === "AUDUSD" && o.type === "sell") && (await state()).trading.live.cashUsd >= 0);
+  const rLive = (await state()).trading.live, adaPos = rLive.positions.find((p) => p.asset === "ADA");
+  check("posición en USD valuada en AUD", adaPos && adaPos.quote === "USD" && Math.abs(adaPos.cost - 300) < 15 && Math.abs(rLive.equity - (rLive.cash + rLive.positions.reduce((t, p) => t + p.units * p.mark * p.fx, 0))) < 0.01, JSON.stringify(adaPos || {}).slice(0, 160));
   check("abre SOL", !(await call("place_trade", { asset: "SOL", amount_aud: Math.floor((await state()).trading.live.cash - 50), stop_loss: 285, rationale: "SOL rompe máximos de 20 días; stop debajo del último mínimo." })).err);
   PRICES.SOLAUD = 1500;
   await call("refresh_trading"); r = await state();
   check("al objetivo vende todo y pasa a USDC", r.trading.mandate.status === "target" && Object.values(ORDERS).some((o) => o.pair === "USDCAUD" && o.status === "closed") && r.props.some((p) => p.t === "El mandato real llegó al objetivo"), r.trading.mandate.status);
-  check("al objetivo también vende ADA", Object.values(ORDERS).some((o) => o.pair === "ADAAUD" && o.type === "sell" && o.ordertype === "market"));
+  check("al objetivo también vende ADA y pasa los USD a USDC", Object.values(ORDERS).some((o) => o.pair === "ADAUSD" && o.type === "sell" && o.ordertype === "market") && Object.values(ORDERS).some((o) => o.pair === "USDCUSD" && o.status === "closed"));
   check("no queda ningún stop abierto", Object.values(ORDERS).every((o) => o.status !== "open"));
   PRICES.XBTAUD = 140000; PRICES.ETHAUD = 5000; PRICES.SOLAUD = 300;
   mock.close();

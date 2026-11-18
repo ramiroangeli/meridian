@@ -169,6 +169,8 @@ export const SCHEMA: string[] = [
      asset text not null, pair text not null, thesis text not null default '', agent_code text not null default 'N',
      created_at timestamptz not null default now(), expires_at timestamptz not null,
      primary key (user_id, asset))`,
+  `alter table trading_positions add column if not exists quote text not null default 'AUD'`,
+  `alter table trading_intents add column if not exists quote text not null default 'AUD'`,
 ];
 
 export const TABLES = ["users", "accounts", "balances", "liabilities", "transactions", "net_worth_history", "agents", "agent_runs", "proposals", "events", "fiscal_items", "fx_rates", "agent_tasks", "source_status", "price_history", "trading_mandates", "trading_fills", "trading_equity", "trading_positions", "trading_intents", "trading_watchlist"];

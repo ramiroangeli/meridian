@@ -352,7 +352,7 @@ export function registerTradingTools(server: any) {
     const real = t.mandate?.mode === "live";
     const lista = await watchlist(u.id);
     return ok({ ...t, equity: t.equity.slice(-30), lista_de_nora: lista, nota: real
-      ? "Dinero real. Límites que el código aplica: BTC, ETH, SOL y XRP más la lista vigente de Nora, siempre contra AUD al contado y con liquidez mínima; fuera de las 4 principales, máximo 35% del patrimonio por moneda; una posición por moneda; cada compra lleva stop-loss cargado en Kraken; el patrimonio con todos los stops ejecutados nunca puede quedar debajo del piso; al objetivo se vende todo y pasa a USDC. Capital, piso y objetivo solo los cambia el usuario."
+      ? "Dinero real. Límites que el código aplica: BTC, ETH, SOL y XRP más la lista vigente de Nora, al contado contra AUD (las 4 principales) o USD (el resto), con liquidez mínima; fuera de las 4 principales, máximo 35% del patrimonio por moneda; una posición por moneda; cada compra lleva stop-loss cargado en Kraken; el patrimonio con todos los stops ejecutados nunca puede quedar debajo del piso; al objetivo se vende todo y pasa a USDC. Capital, piso y objetivo solo los cambia el usuario."
       : "Modo simulado: el motor usa precios reales de Kraken pero no envía órdenes. Capital, piso y objetivo solo los cambia el usuario." });
   });
 
@@ -367,7 +367,7 @@ export function registerTradingTools(server: any) {
 
   server.registerTool("scan_market", {
     title: "Barrer el mercado de Kraken",
-    description: "Para Nora (N). Lista todos los pares al contado de Kraken que cotizan en AUD, con precio, volumen de 24 h en AUD, spread y cambio de 24 h; marca cuáles pasan los filtros de liquidez. Datos públicos.",
+    description: "Para Nora (N). Lista todos los pares al contado de Kraken que cotizan en AUD o USD (uno por moneda), con precio en su moneda, volumen de 24 h en AUD, spread y cambio de 24 h; marca cuáles pasan los filtros de liquidez. Datos públicos.",
     inputSchema: z.object({ min_volume_aud: z.number().positive().optional() }),
   }, async (a: any) => {
     try { return ok(await scanMarket(a?.min_volume_aud)); } catch (e: any) { return fail(e?.message || "No se pudo barrer el mercado."); }
@@ -375,7 +375,7 @@ export function registerTradingTools(server: any) {
 
   server.registerTool("set_watchlist", {
     title: "Fijar la lista de monedas operables",
-    description: "Solo Nora (N). Reemplaza la lista de hasta 10 monedas que Teo puede operar además de BTC, ETH, SOL y XRP. Cada una con su tesis. El código descarta las que no cotizan contra AUD o no pasan liquidez. La lista vence a los 4 días si no se renueva.",
+    description: "Solo Nora (N). Reemplaza la lista de hasta 10 monedas que Teo puede operar además de BTC, ETH, SOL y XRP. Cada una con su tesis. El código descarta las que no cotizan contra AUD ni USD o no pasan liquidez. La lista vence a los 4 días si no se renueva.",
     inputSchema: z.object({ items: z.array(z.object({ asset: z.string().regex(/^[A-Za-z0-9]{2,12}$/), thesis: z.string().min(20).max(400) })).max(10) }),
   }, async (a: any) => {
     const u = await currentUser();
@@ -389,12 +389,12 @@ export function registerTradingTools(server: any) {
 
   server.registerTool("place_trade", {
     title: "Abrir una operación (dinero real)",
-    description: "Solo Teo (M). Compra a mercado una moneda permitida (BTC, ETH, SOL, XRP o una de la lista vigente de Nora; contra AUD, al contado) con parte del efectivo del mandato real y carga un stop-loss en Kraken. Rechaza la orden si: la moneda no está permitida, tiene menos de AUD 150.000 de volumen en 24 h o más de 0,6% de spread, supera 35% del patrimonio (fuera de las 4 principales), ya hay posición en esa moneda, el monto supera el efectivo, el stop no queda entre 0,5% y 50% debajo del precio, o si con todos los stops ejecutados el mandato quedaría debajo del piso. Antes de la fecha de inicio solo ensaya (Kraken valida sin ejecutar). La primera orden real espera la aprobación del usuario.",
+    description: "Solo Teo (M). Compra a mercado una moneda permitida (BTC, ETH, SOL, XRP contra AUD, o una de la lista vigente de Nora, contra USD si Kraken tiene ese par; siempre al contado). Si hace falta, convierte AUD a USD dentro de la caja del mandato. El monto siempre en AUD; stop y take profit en la moneda del par con parte del efectivo del mandato real y carga un stop-loss en Kraken. Rechaza la orden si: la moneda no está permitida, tiene menos de AUD 150.000 de volumen en 24 h o más de 0,6% de spread, supera 35% del patrimonio (fuera de las 4 principales), ya hay posición en esa moneda, el monto supera el efectivo, el stop no queda entre 0,5% y 50% debajo del precio, o si con todos los stops ejecutados el mandato quedaría debajo del piso. Antes de la fecha de inicio solo ensaya (Kraken valida sin ejecutar). La primera orden real espera la aprobación del usuario.",
     inputSchema: z.object({
       asset: z.string().regex(/^[A-Za-z0-9]{2,12}$/).describe("Símbolo de la moneda, p. ej. BTC, ETH, ADA"),
       amount_aud: z.number().positive().describe("AUD a invertir de la caja del mandato"),
-      stop_loss: z.number().positive().describe("Precio en AUD del stop-loss (venta a mercado si se toca)"),
-      take_profit: z.number().positive().optional().describe("Precio en AUD en que Teo vende la posición. Lo controla Meridiano, no Kraken."),
+      stop_loss: z.number().positive().describe("Precio del stop-loss en la moneda de cotización del par (AUD o USD; ver cotiza_en en market_snapshot). Si se toca, vende a mercado."),
+      take_profit: z.number().positive().optional().describe("Precio de venta objetivo, en la misma moneda que el stop. Lo controla Meridiano, no Kraken."),
       rationale: z.string().min(20).max(600).describe("El plan: por qué esta moneda, por qué este stop y este objetivo, y qué invalida la idea"),
     }),
   }, async (a: any) => {
@@ -413,7 +413,7 @@ export function registerTradingTools(server: any) {
 
   server.registerTool("update_stop", {
     title: "Mover un stop-loss (dinero real)",
-    description: "Solo Teo (M). Carga un stop nuevo en Kraken y cancela el anterior. Subirlo siempre se permite; bajarlo solo si el peor caso del mandato sigue sobre el piso.",
+    description: "Solo Teo (M). Carga un stop nuevo en Kraken (precio en la moneda del par) y cancela el anterior. Subirlo siempre se permite; bajarlo solo si el peor caso del mandato sigue sobre el piso.",
     inputSchema: z.object({ asset: z.string().regex(/^[A-Za-z0-9]{2,12}$/).describe("Símbolo de la moneda, p. ej. BTC, ETH, ADA"), stop_loss: z.number().positive() }),
   }, async (a: any) => {
     const u = await currentUser();
