@@ -5,7 +5,7 @@ import { q } from "./db";
 // BTC, ETH, SOL y XRP se operan contra AUD; el resto, contra USD si existe (ahí está la liquidez) y si no contra AUD.
 // Las de CORE siempre están permitidas; el resto, solo si el investigador (N) las puso en la lista vigente.
 export const CORE = ["BTC", "ETH", "SOL", "XRP"];
-const NOT_TRADED = new Set(["AUD", "USD", "EUR", "GBP", "CAD", "CHF", "JPY", "USDT", "USDC", "DAI", "PYUSD", "USDG", "TUSD", "USDS", "RLUSD", "EURC", "EURT", "FDUSD", "USDE", "USDQ", "USDR", "AUDX", "AUDD", "USD1", "EURQ", "EURR", "GHO", "FRAX", "LUSD", "USDP", "GUSD", "UST"]);
+const NOT_TRADED = new Set(["AUD", "USD", "EUR", "GBP", "CAD", "CHF", "JPY", "USDT", "USDC", "DAI", "PYUSD", "USDG", "TUSD", "USDS", "RLUSD", "EURC", "EURT", "FDUSD", "USDE", "USDQ", "USDR", "AUDX", "AUDD", "USD1", "EURQ", "EURR", "GHO", "FRAX", "LUSD", "USDP", "GUSD", "UST", "AUSD", "FIDD", "BRL1", "EUROP", "USDF", "TBTC"]);
 export const LIQ = { minVolAud: 150_000, maxSpread: 0.006, maxWeight: 0.35, watchDays: 4, maxWatch: 10 };
 
 export type Quote = "AUD" | "USD";
